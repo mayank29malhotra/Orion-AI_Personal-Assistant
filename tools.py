@@ -50,6 +50,11 @@ async def other_tools():
     wiki_tool = WikipediaQueryRun(api_wrapper=wikipedia)
 
     python_repl = PythonREPL()
+    python_repl_tool = Tool(
+        name="python_repl",
+        func=python_repl.run,
+        description="A Python shell. Use this to execute python commands. Input should be a valid python command. If you want to see the output of a value, you should print it out with `print(...)`."
+    )
     
-    return file_tools + [push_tool, tool_search, python_repl,  wiki_tool]
+    return file_tools + [push_tool, tool_search, python_repl_tool, wiki_tool]
 
