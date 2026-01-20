@@ -1,3 +1,14 @@
+# Disable SSL warnings and LangSmith tracing before imports
+import os
+os.environ['LANGSMITH_TRACING'] = 'false'
+os.environ['CURL_CA_BUNDLE'] = ''
+os.environ['REQUESTS_CA_BUNDLE'] = ''
+os.environ['NO_PROXY'] = 'api.groq.com,generativelanguage.googleapis.com'
+
+import warnings
+import urllib3
+warnings.filterwarnings('ignore', category=urllib3.exceptions.InsecureRequestWarning)
+
 from typing import Annotated
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
@@ -46,19 +57,46 @@ class Orion:
         self.playwright = None
 
     async def setup(self):
-        import os
+        import ssl
+        import httpx
         from langchain_google_genai import ChatGoogleGenerativeAI
+        
+        # Get proxy settings from environment if available
+        http_proxy = os.getenv('HTTP_PROXY') or os.getenv('http_proxy')
+        https_proxy = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
+        
+        # Create HTTP client with SSL verification completely disabled
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        # Configure httpx clients with disabled verification and no redirects
+        http_client = httpx.Client(
+            verify=False, 
+            timeout=60.0,
+            follow_redirects=False,
+            proxy=https_proxy
+        )
+        async_http_client = httpx.AsyncClient(
+            verify=False, 
+            timeout=60.0,
+            follow_redirects=False,
+            proxy=https_proxy
+        )
+        
         self.tools, self.browser, self.playwright = await playwright_tools()
         self.tools += await other_tools()
         GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-        GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
         groq_api_key = os.getenv("GROQ_API_KEY")
         gemini_api_key = os.getenv("GEMINI_API_KEY")
 
         worker_llm = ChatOpenAI(
             model="llama-3.3-70b-versatile",
             base_url=GROQ_BASE_URL,
-            api_key=groq_api_key
+            api_key=groq_api_key,
+            http_client=http_client,
+            http_async_client=async_http_client,
+            max_retries=2
         )
         self.worker_llm_with_tools = worker_llm.bind_tools(self.tools)
 
@@ -218,10 +256,12 @@ class Orion:
             "user_input_needed": False,
         }
         result = await self.graph.ainvoke(state, config=config)
-        user = {"role": "user", "content": message}
-        reply = {"role": "assistant", "content": result["messages"][-2].content}
-        feedback = {"role": "assistant", "content": result["messages"][-1].content}
-        return history + [user, reply, feedback]
+        
+        # Extract the assistant's reply from the result
+        assistant_message = result["messages"][-2].content if len(result["messages"]) >= 2 else "No response"
+        
+        # Return in tuple format: (user_message, assistant_message)
+        return history + [[message, assistant_message]]
 
     def cleanup(self):
         if self.browser:

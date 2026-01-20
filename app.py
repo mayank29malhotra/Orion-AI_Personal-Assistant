@@ -3,14 +3,28 @@ from orion import Orion
 
 
 async def setup():
-    orion = Orion()
-    await orion.setup()
-    return orion
+    try:
+        orion = Orion()
+        await orion.setup()
+        return orion
+    except Exception as e:
+        print(f"Setup failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 async def process_message(orion, message, success_criteria, history):
-    results = await orion.run_superstep(message, success_criteria, history)
-    return results, orion
+    if orion is None:
+        return [[message, "Error: Orion failed to initialize. Please check your API keys and network connection."]], None
+    try:
+        results = await orion.run_superstep(message, success_criteria, history)
+        return results, orion
+    except Exception as e:
+        print(f"Process message failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return [[message, f"Error: {str(e)}"]], orion
 
 
 async def reset():
@@ -28,7 +42,7 @@ def free_resources(orion):
         print(f"Exception during cleanup: {e}")
 
 
-with gr.Blocks(title="Orion", theme=gr.themes.Default(primary_hue="emerald")) as ui:
+with gr.Blocks(title="Orion") as ui:
     gr.Markdown("## Orion Personal Co-Worker")
     orion = gr.State(delete_callback=free_resources)
 
