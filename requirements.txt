@@ -1,14 +1,59 @@
-gradio
-langgraph
-python-dotenv
-langchain-openai
-langchain-core
-langchain-google-genai
-langchain-community
-pydantic
-playwright
-requests
-langchain-experimental
-wikipedia
-typing-extensions
-httpx
+# Core Dependencies
+gradio>=4.0.0
+langgraph>=0.2.0
+python-dotenv>=1.0.0
+langchain-openai>=0.1.0
+langchain-core>=0.2.0
+langchain-google-genai>=1.0.0
+langchain-community>=0.2.0
+langchain-experimental>=0.0.60
+pydantic>=2.0.0
+typing-extensions>=4.5.0
+
+# Browser Automation
+playwright>=1.40.0
+
+# HTTP & Networking
+httpx>=0.24.0
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Email & Calendar
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+
+# Document Processing
+PyPDF2>=3.0.0
+pdf2image>=1.16.3
+reportlab>=4.0.0
+openpyxl>=3.1.0
+xlrd>=2.0.1
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Image Processing & OCR
+Pillow>=10.0.0
+pytesseract>=0.3.10
+qrcode>=7.4.2
+
+# Text Processing
+markdown>=3.5.0
+html2text>=2020.1.16
+
+# Wikipedia
+wikipedia>=1.4.0
+
+# Tesseract OCR (system dependency - see installation notes below)
+# Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
+# Linux: sudo apt-get install tesseract-ocr
+# Mac: brew install tesseract
+
+# Google Serper API (for web search)
+google-search-results>=2.4.2
+
+# Additional utilities
+pyperclip>=1.8.2  # Clipboard operations (future use)
+
