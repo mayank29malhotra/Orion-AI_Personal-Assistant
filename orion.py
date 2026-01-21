@@ -20,10 +20,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from typing import List, Any, Optional, Dict
 from pydantic import BaseModel, Field
-from tools import playwright_tools, other_tools
 import uuid
 import asyncio
 from datetime import datetime
+from config import Config
+from utils import logger, retry_on_error, async_retry_on_error
 
 load_dotenv(override=True)
 
@@ -55,11 +56,20 @@ class Orion:
         self.memory = MemorySaver()
         self.browser = None
         self.playwright = None
+        self.tool_usage_count = 0
+        logger.info(f"Orion instance created with ID: {self.orion_id}")
 
+    @async_retry_on_error(max_retries=2, delay=1.0)
     async def setup(self):
         import ssl
         import httpx
         from langchain_google_genai import ChatGoogleGenerativeAI
+        from tools_enhanced import get_all_tools
+        
+        logger.info("Starting Orion setup...")
+        
+        # Ensure required directories exist
+        Config.ensure_directories()
         
         # Get proxy settings from environment if available
         http_proxy = os.getenv('HTTP_PROXY') or os.getenv('http_proxy')
@@ -84,34 +94,52 @@ class Orion:
             proxy=https_proxy
         )
         
-        self.tools, self.browser, self.playwright = await playwright_tools()
-        self.tools += await other_tools()
+        # Initialize all tools
+        self.tools, self.browser, self.playwright = await get_all_tools()
+        logger.info(f"Loaded {len(self.tools)} tools")
+        
         GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-        groq_api_key = os.getenv("GROQ_API_KEY")
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
 
         worker_llm = ChatOpenAI(
-            model="llama-3.3-70b-versatile",
+            model=Config.WORKER_MODEL,
             base_url=GROQ_BASE_URL,
-            api_key=groq_api_key,
+            api_key=Config.GROQ_API_KEY,
             http_client=http_client,
             http_async_client=async_http_client,
             max_retries=2
         )
+        logger.info("Worker LLM initialized")
         self.worker_llm_with_tools = worker_llm.bind_tools(self.tools)
 
         evaluator_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-lite",
-            google_api_key=gemini_api_key
+            model=Config.EVALUATOR_MODEL,
+            google_api_key=Config.GEMINI_API_KEY
         )
         self.evaluator_llm_with_output = evaluator_llm.with_structured_output(EvaluatorOutput)
+        logger.info("Evaluator LLM initialized")
+        
         await self.build_graph()
+        logger.info("Orion setup completed successfully")
 
     def worker(self, state: State) -> Dict[str, Any]:
         system_message = f"""You are a helpful assistant that can use tools to complete tasks.
     You keep working on a task until either you have a question or clarification for the user, or the success criteria is met.
-    You have many tools to help you, including tools to browse the internet, navigating and retrieving web pages.
-    You have a tool to run python code, but note that you would need to include a print() statement if you wanted to receive output.
+    You have access to 35+ powerful tools across multiple categories:
+    
+    - Email Management: Send and read emails
+    - Calendar: Create and manage Google Calendar events
+    - Tasks & Reminders: Create, list, and complete tasks
+    - Notes: Create and search notes
+    - Screenshots: Capture screenshots
+    - PDF: Read and create PDF files
+    - OCR: Extract text from images
+    - Data: Read/write CSV, Excel, JSON files
+    - Markdown: Convert between Markdown and HTML
+    - QR Codes: Generate QR codes
+    - Web: Browse websites, search, Wikipedia
+    - Python: Execute Python code
+    - Files: Full file management
+    
     The current date and time is {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
     This is the success criteria:
@@ -144,12 +172,19 @@ class Orion:
             messages = [SystemMessage(content=system_message)] + messages
 
         # Invoke the LLM with tools
-        response = self.worker_llm_with_tools.invoke(messages)
-
-        # Return updated state
-        return {
-            "messages": [response],
-        }
+        try:
+            response = self.worker_llm_with_tools.invoke(messages)
+            
+            # Track tool usage
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                self.tool_usage_count += len(response.tool_calls)
+                logger.info(f"Worker invoked {len(response.tool_calls)} tools")
+            
+            return {"messages": [response]}
+        except Exception as e:
+            logger.error(f"Worker error: {str(e)}")
+            error_message = AIMessage(content=f"I encountered an error: {str(e)}")
+            return {"messages": [error_message]}
 
     def worker_router(self, state: State) -> str:
         last_message = state["messages"][-1]
@@ -255,15 +290,28 @@ class Orion:
             "success_criteria_met": False,
             "user_input_needed": False,
         }
-        result = await self.graph.ainvoke(state, config=config)
         
-        # Extract the assistant's reply from the result
-        assistant_message = result["messages"][-2].content if len(result["messages"]) >= 2 else "No response"
-        
-        # Return in tuple format: (user_message, assistant_message)
-        return history + [[message, assistant_message]]
+        try:
+            logger.info(f"Running superstep for message: {message[:50]}...")
+            result = await self.graph.ainvoke(state, config=config)
+            
+            # Extract the assistant's reply from the result
+            assistant_message = result["messages"][-2].content if len(result["messages"]) >= 2 else "No response"
+            
+            logger.info("Superstep completed successfully")
+            # Return in tuple format: (user_message, assistant_message)
+            return history + [[message, assistant_message]]
+        except Exception as e:
+            logger.error(f"Error in run_superstep: {str(e)}")
+            error_msg = f"I apologize, but I encountered an error: {str(e)}"
+            return history + [[message, error_msg]]
+    
+    def get_tool_usage_count(self) -> int:
+        """Get the number of tools used in this session"""
+        return self.tool_usage_count
 
     def cleanup(self):
+        logger.info("Cleaning up Orion resources...")
         if self.browser:
             try:
                 loop = asyncio.get_running_loop()
@@ -275,3 +323,4 @@ class Orion:
                 asyncio.run(self.browser.close())
                 if self.playwright:
                     asyncio.run(self.playwright.stop())
+        logger.info("Cleanup completed")

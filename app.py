@@ -1,36 +1,87 @@
 import gradio as gr
 from orion import Orion
+import json
+from datetime import datetime
+
+
+# Store session statistics
+session_stats = {
+    "messages_sent": 0,
+    "tools_used": 0,
+    "session_start": None
+}
 
 
 async def setup():
     try:
         orion = Orion()
         await orion.setup()
-        return orion
+        session_stats["session_start"] = datetime.now()
+        return orion, "✅ Orion initialized successfully", 0, 0
     except Exception as e:
         print(f"Setup failed: {e}")
         import traceback
         traceback.print_exc()
-        return None
+        return None, f"❌ Setup failed: {str(e)}", 0, 0
 
 
-async def process_message(orion, message, success_criteria, history):
+async def process_message(orion, message, success_criteria, history, upload_files):
     if orion is None:
-        return [[message, "Error: Orion failed to initialize. Please check your API keys and network connection."]], None
+        return [[message, "Error: Orion failed to initialize. Please check your API keys and network connection."]], None, session_stats["messages_sent"], session_stats["tools_used"]
+    
     try:
+        # Handle file uploads
+        file_context = ""
+        if upload_files:
+            file_context = "\n\n📎 Uploaded files:\n"
+            for file in upload_files:
+                file_context += f"- {file.name}\n"
+            message = message + file_context
+        
         results = await orion.run_superstep(message, success_criteria, history)
-        return results, orion
+        
+        # Update statistics
+        session_stats["messages_sent"] += 1
+        session_stats["tools_used"] = orion.get_tool_usage_count()
+        
+        return results, orion, session_stats["messages_sent"], session_stats["tools_used"]
     except Exception as e:
         print(f"Process message failed: {e}")
         import traceback
         traceback.print_exc()
-        return [[message, f"Error: {str(e)}"]], orion
+        return [[message, f"Error: {str(e)}"]], orion, session_stats["messages_sent"], session_stats["tools_used"]
 
 
 async def reset():
     new_orion = Orion()
     await new_orion.setup()
-    return "", "", None, new_orion
+    session_stats["messages_sent"] = 0
+    session_stats["tools_used"] = 0
+    session_stats["session_start"] = datetime.now()
+    return "", "", None, new_orion, "🔄 Session reset", 0, 0
+
+
+def export_conversation(history):
+    """Export conversation history to JSON"""
+    try:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"orion_conversation_{timestamp}.json"
+        
+        export_data = {
+            "export_date": datetime.now().isoformat(),
+            "session_start": session_stats["session_start"].isoformat() if session_stats["session_start"] else None,
+            "messages_count": session_stats["messages_sent"],
+            "tools_used": session_stats["tools_used"],
+            "conversation": history
+        }
+        
+        filepath = f"sandbox/{filename}"
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False)
+        
+        return f"✅ Conversation exported to {filepath}"
+    except Exception as e:
+        return f"❌ Failed to export conversation: {str(e)}"
 
 
 def free_resources(orion):
@@ -42,34 +93,161 @@ def free_resources(orion):
         print(f"Exception during cleanup: {e}")
 
 
-with gr.Blocks(title="Orion") as ui:
-    gr.Markdown("## Orion Personal Co-Worker")
+# Custom CSS for better UI
+custom_css = """
+.container {
+    max-width: 1200px;
+    margin: auto;
+}
+.stats-box {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+    font-weight: bold;
+}
+.header-text {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 2.5em;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 20px;
+}
+"""
+
+
+with gr.Blocks(title="Orion AI Assistant", css=custom_css, theme=gr.themes.Soft(primary_hue="purple")) as ui:
+    gr.HTML('<div class="header-text">🌟 Orion AI Personal Assistant 🌟</div>')
+    gr.Markdown("""
+    ### Your Enhanced AI Co-Worker with 35+ Tools
+    📧 Email Management | 📅 Calendar | 📝 Notes & Tasks | 📄 PDF Processing | 🔍 OCR | 📊 Data Analysis | 🌐 Web Automation
+    """)
+    
     orion = gr.State(delete_callback=free_resources)
-
+    
     with gr.Row():
-        chatbot = gr.Chatbot(label="Orion", height=300)
-    with gr.Group():
-        with gr.Row():
-            message = gr.Textbox(show_label=False, placeholder="Your request to the Orion")
-        with gr.Row():
-            success_criteria = gr.Textbox(
-                show_label=False, placeholder="What are your success critiera?"
+        with gr.Column(scale=3):
+            chatbot = gr.Chatbot(
+                label="💬 Conversation",
+                height=450,
+                show_label=True,
+                avatar_images=(None, "🤖")
             )
-    with gr.Row():
-        reset_button = gr.Button("Reset", variant="stop")
-        go_button = gr.Button("Go!", variant="primary")
-
-    ui.load(setup, [], [orion])
+            
+            with gr.Group():
+                with gr.Row():
+                    message = gr.Textbox(
+                        show_label=False,
+                        placeholder="💭 What would you like Orion to help you with?",
+                        lines=2
+                    )
+                
+                with gr.Row():
+                    upload_files = gr.File(
+                        label="📎 Attach Files (Optional)",
+                        file_count="multiple",
+                        file_types=[".pdf", ".csv", ".xlsx", ".json", ".txt", ".png", ".jpg", ".jpeg"]
+                    )
+                
+                with gr.Row():
+                    success_criteria = gr.Textbox(
+                        show_label=False,
+                        placeholder="🎯 Success criteria (optional): What would make this response perfect?",
+                        lines=1
+                    )
+            
+            with gr.Row():
+                reset_button = gr.Button("🔄 Reset Session", variant="stop", size="sm")
+                export_button = gr.Button("💾 Export Chat", variant="secondary", size="sm")
+                go_button = gr.Button("🚀 Send", variant="primary", size="lg")
+        
+        with gr.Column(scale=1):
+            gr.Markdown("### 📊 Session Statistics")
+            status_box = gr.Textbox(
+                label="Status",
+                value="⏳ Initializing...",
+                interactive=False
+            )
+            messages_count = gr.Number(
+                label="💬 Messages Sent",
+                value=0,
+                interactive=False
+            )
+            tools_count = gr.Number(
+                label="🔧 Tools Used",
+                value=0,
+                interactive=False
+            )
+            
+            gr.Markdown("### 🎨 Available Tools")
+            gr.Markdown("""
+            **Productivity:**
+            - 📧 Email (Send/Read)
+            - 📅 Google Calendar
+            - ✅ Tasks & Reminders
+            - 📝 Notes
+            - 📸 Screenshots
+            
+            **Document Processing:**
+            - 📄 PDF Reader/Writer
+            - 🔍 OCR (Image to Text)
+            - 📊 CSV/Excel Reader
+            - 📋 JSON Handler
+            - 📝 Markdown Converter
+            
+            **Communication:**
+            - 📱 Push Notifications
+            - 🔲 QR Code Generator
+            
+            **Information:**
+            - 🌐 Web Search
+            - 🌍 Wikipedia
+            - 🐍 Python Executor
+            - 🌐 Browser Automation
+            """)
+            
+            export_status = gr.Textbox(
+                label="Export Status",
+                value="",
+                interactive=False,
+                visible=False
+            )
+    
+    # Event handlers
+    ui.load(setup, [], [orion, status_box, messages_count, tools_count])
+    
     message.submit(
-        process_message, [orion, message, success_criteria, chatbot], [chatbot, orion]
+        process_message,
+        [orion, message, success_criteria, chatbot, upload_files],
+        [chatbot, orion, messages_count, tools_count]
     )
+    
     success_criteria.submit(
-        process_message, [orion, message, success_criteria, chatbot], [chatbot, orion]
+        process_message,
+        [orion, message, success_criteria, chatbot, upload_files],
+        [chatbot, orion, messages_count, tools_count]
     )
+    
     go_button.click(
-        process_message, [orion, message, success_criteria, chatbot], [chatbot, orion]
+        process_message,
+        [orion, message, success_criteria, chatbot, upload_files],
+        [chatbot, orion, messages_count, tools_count]
     )
-    reset_button.click(reset, [], [message, success_criteria, chatbot, orion])
+    
+    reset_button.click(
+        reset,
+        [],
+        [message, success_criteria, chatbot, orion, status_box, messages_count, tools_count]
+    )
+    
+    export_button.click(
+        export_conversation,
+        [chatbot],
+        [export_status]
+    )
 
 
-ui.launch(inbrowser=True, theme=gr.themes.Default(primary_hue="emerald"))
+ui.launch(inbrowser=True, share=False)
