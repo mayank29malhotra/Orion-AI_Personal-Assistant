@@ -13,8 +13,7 @@ class Config:
     # API Keys
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    PUSHOVER_TOKEN = os.getenv("PUSHOVER_TOKEN")
-    PUSHOVER_USER = os.getenv("PUSHOVER_USER")
+    NTFY_TOPIC = os.getenv("NTFY_TOPIC")
     SERPER_API_KEY = os.getenv("SERPER_API_KEY")
     
     # Email Configuration
