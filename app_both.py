@@ -139,9 +139,11 @@ DEFAULT_USER_ID = os.getenv("HF_USER_ID", "gradio_user")
 
 async def setup():
     try:
+        logger.info("Gradio: Initializing Orion instance...")
         orion = Orion()
         await orion.setup()
         session_stats["session_start"] = datetime.now()
+        logger.info("Gradio: Orion instance ready!")
         
         # Build status message
         status_parts = ["✅ Orion initialized"]
@@ -162,7 +164,15 @@ async def setup():
 
 async def process_message(orion, message, success_criteria, history, upload_files):
     if orion is None:
-        return [[message, "Error: Orion failed to initialize."]], None, session_stats["messages_sent"], session_stats["tools_used"]
+        # Try to initialize on-demand if setup failed
+        logger.warning("Orion is None, attempting on-demand initialization...")
+        try:
+            orion = Orion()
+            await orion.setup()
+            logger.info("On-demand Orion initialization successful!")
+        except Exception as e:
+            logger.error(f"On-demand initialization failed: {e}")
+            return [[message, f"Error: Orion failed to initialize. Please refresh the page. ({str(e)})"]], None, session_stats["messages_sent"], session_stats["tools_used"]
     
     try:
         file_context = ""
@@ -266,7 +276,7 @@ with gr.Blocks(title="Orion AI Assistant", css=custom_css, theme=gr.themes.Soft(
     
     with gr.Row():
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(label="💬 Conversation", height=400)
+            chatbot = gr.Chatbot(label="💬 Conversation", height=400, type="tuples")
             
             with gr.Group():
                 message = gr.Textbox(placeholder="💭 What would you like help with?", lines=2, show_label=False)
