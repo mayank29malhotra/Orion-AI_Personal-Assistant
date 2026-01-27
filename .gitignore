@@ -3,11 +3,15 @@
 .env.local
 .env.production
 
-# Python virtual environments
+# Python virtual environments - MUST be excluded
 .venv/
+.venv
 venv/
+venv
 env/
 .Python
+*.dll
+*.exe
 
 # Python cache
 __pycache__/
