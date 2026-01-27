@@ -47,6 +47,12 @@ class Config:
     WORKER_MODEL = os.getenv("WORKER_MODEL", "llama-3.3-70b-versatile")
     EVALUATOR_MODEL = os.getenv("EVALUATOR_MODEL", "gemini-2.5-flash-lite")
     
+    # WhatsApp Integration (Twilio)
+    TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+    TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+    TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")  # Format: whatsapp:+14155238886
+    WHATSAPP_WEBHOOK_PORT = int(os.getenv("WHATSAPP_WEBHOOK_PORT", "5000"))
+    
     @classmethod
     def ensure_directories(cls):
         """Ensure all required directories exist"""
