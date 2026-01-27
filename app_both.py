@@ -1,7 +1,6 @@
 """
-HuggingFace Spaces Entry Point - Runs ALL Integrations
-Gradio UI + Telegram Bot + Email Bot + Scheduler
-Best of all worlds: Web UI + Telegram + Email + Scheduled Tasks!
+Orion AI Assistant - Main Entry Point
+Runs ALL Integrations: Gradio UI + Telegram Bot + Email Bot + Scheduler
 """
 import os
 import sys
@@ -15,21 +14,18 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("OrionHF")
+logger = logging.getLogger("Orion")
 
-# HuggingFace Spaces detection and setup
-IS_HF_SPACE = os.path.exists("/data") or os.getenv("SPACE_ID")
-
-if IS_HF_SPACE:
-    DATA_DIR = "/data"
-    os.makedirs(f"{DATA_DIR}/sandbox", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/data", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/notes", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/tasks", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/temp", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/screenshots", exist_ok=True)
-    os.environ["ORION_DATA_DIR"] = DATA_DIR
-    logger.info(f"🚀 Running on HuggingFace Spaces - Data dir: {DATA_DIR}")
+# Data directory - use ORION_DATA_DIR env var or default to ./data
+DATA_DIR = os.getenv("ORION_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+os.makedirs(f"{DATA_DIR}/sandbox", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/data", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/notes", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/tasks", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/temp", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/screenshots", exist_ok=True)
+os.environ["ORION_DATA_DIR"] = DATA_DIR
+logger.info(f"🚀 Orion starting - Data dir: {DATA_DIR}")
 
 
 # ============ Background Services ============
@@ -134,7 +130,7 @@ session_stats = {
     "session_start": None
 }
 
-DEFAULT_USER_ID = os.getenv("HF_USER_ID", "gradio_user")
+DEFAULT_USER_ID = os.getenv("ORION_USER_ID", "gradio_user")
 
 
 async def setup():

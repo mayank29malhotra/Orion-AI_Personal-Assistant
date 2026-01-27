@@ -46,8 +46,8 @@ RUN playwright install-deps chromium
 # Copy application code
 COPY . .
 
-# Create data directories
-RUN mkdir -p /data/sandbox/data /data/sandbox/notes /data/sandbox/tasks /data/sandbox/temp /data/sandbox/screenshots
+# Create data directory (will be mounted as volume for persistence)
+RUN mkdir -p /app/data/sandbox/data /app/data/sandbox/notes /app/data/sandbox/tasks /app/data/sandbox/temp /app/data/sandbox/screenshots
 
 # Expose port for Gradio
 EXPOSE 7860
@@ -56,6 +56,7 @@ EXPOSE 7860
 ENV PYTHONUNBUFFERED=1
 ENV GRADIO_SERVER_NAME=0.0.0.0
 ENV GRADIO_SERVER_PORT=7860
+ENV ORION_DATA_DIR=/app/data
 
 # Run the application
 CMD ["python", "app_both.py"]

@@ -4,24 +4,16 @@ from core.agent import Orion
 import json
 from datetime import datetime
 
-# HuggingFace Spaces detection and setup
-IS_HF_SPACE = os.path.exists("/data") or os.getenv("SPACE_ID")
-
-# Configure paths for HF Spaces persistent storage
-if IS_HF_SPACE:
-    # HuggingFace provides /data for persistent storage
-    DATA_DIR = "/data"
-    os.makedirs(f"{DATA_DIR}/sandbox", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/data", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/notes", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/tasks", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/temp", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/sandbox/screenshots", exist_ok=True)
-    # Set environment variable for core modules to use
-    os.environ["ORION_DATA_DIR"] = DATA_DIR
-    print(f"🚀 Running on HuggingFace Spaces - Data dir: {DATA_DIR}")
-else:
-    print("🖥️ Running locally")
+# Data directory - use ORION_DATA_DIR env var or default to ./data
+DATA_DIR = os.getenv("ORION_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+os.makedirs(f"{DATA_DIR}/sandbox", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/data", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/notes", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/tasks", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/temp", exist_ok=True)
+os.makedirs(f"{DATA_DIR}/sandbox/screenshots", exist_ok=True)
+os.environ["ORION_DATA_DIR"] = DATA_DIR
+print(f"🚀 Orion starting - Data dir: {DATA_DIR}")
 
 
 # Store session statistics
@@ -31,8 +23,8 @@ session_stats = {
     "session_start": None
 }
 
-# Default user ID for Gradio (in HF Spaces, we use a session-based ID)
-DEFAULT_USER_ID = os.getenv("HF_USER_ID", "gradio_user")
+# Default user ID for Gradio
+DEFAULT_USER_ID = os.getenv("ORION_USER_ID", "gradio_user")
 
 
 async def setup():
