@@ -79,7 +79,7 @@ An advanced AI-powered personal assistant with **35+ tools** across multiple cat
 - Sandboxed environment for safety
 
 #### 📱 Communication
-- **Push Notifications**: Send notifications via Pushover
+- **Push Notifications**: Send notifications via NTFY
 - Real-time alerts for important updates
 
 ## 🚀 Quick Start
@@ -125,7 +125,7 @@ cp .env.example .env
 #### Optional (For specific features):
 - **Email**: Gmail App Password or SMTP credentials
 - **Google Calendar**: OAuth2 credentials from [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-- **Push Notifications**: Pushover tokens from [Pushover.net](https://pushover.net/)
+- **Push Notifications**: NTFY topic from [NTFY.sh](https://ntfy.sh/)
 
 ### Running Orion
 

@@ -66,7 +66,7 @@ Orion AI Personal Assistant has been significantly enhanced with **35+ tools** a
 - 🐍 Python REPL
 - 📁 File Management (read, write, copy, move, delete)
 - 🌐 Browser Automation (Playwright)
-- 📱 Push Notifications (Pushover)
+- 📱 Push Notifications (NTFY)
 
 **Total: 35+ Tools!**
 

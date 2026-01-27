@@ -57,9 +57,8 @@ SERPER_API_KEY=your_serper_api_key_here
 EMAIL_ADDRESS=your_email@gmail.com
 EMAIL_PASSWORD=your_app_password
 
-# Pushover
-PUSHOVER_TOKEN=your_pushover_token
-PUSHOVER_USER=your_pushover_user
+# NTFY
+NTFY_TOPIC=your_unique_topic_name
 ```
 
 ### 5. Get API Keys

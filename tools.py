@@ -13,9 +13,8 @@ from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
 
 
 load_dotenv(override=True)
-pushover_token = os.getenv("PUSHOVER_TOKEN")
-pushover_user = os.getenv("PUSHOVER_USER")
-pushover_url = "https://api.pushover.net/1/messages.json"
+NTFY_TOPIC = os.getenv("NTFY_TOPIC")
+NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 serper = GoogleSerperAPIWrapper()
 
 async def playwright_tools():
@@ -25,9 +24,20 @@ async def playwright_tools():
     return toolkit.get_tools(), browser, playwright
 
 
-def push(text: str):
+def push(text: str, title="Orion Alert", priority=3):
     """Send a push notification to the user"""
-    requests.post(pushover_url, data = {"token": pushover_token, "user": pushover_user, "message": text})
+    headers = {
+        "Title": title,
+        "Priority": str(priority),  # 1 (low) → 5 (urgent)
+        "Tags": "robot,warning"
+    }
+
+    requests.post(
+        NTFY_URL,
+        data=text.encode("utf-8"),
+        headers=headers,
+        timeout=5
+    )
     return "success"
 
 

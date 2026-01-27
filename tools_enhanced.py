@@ -809,19 +809,24 @@ def generate_qr_code(data: str, filename: str = None) -> str:
 # EXISTING TOOLS
 # ============================================================================
 
-def push_notification(text: str) -> str:
+def push_notification(text: str, title="Orion Alert", priority=3) -> str:
     """Send a push notification to the user"""
     try:
-        if not Config.PUSHOVER_TOKEN or not Config.PUSHOVER_USER:
-            return "❌ Pushover not configured"
+        if not Config.NTFY_TOPIC:
+            return "❌ NTFY not configured"
         
+        ntfy_url = f"https://ntfy.sh/{Config.NTFY_TOPIC}"
+        headers = {
+            "Title": title,
+            "Priority": str(priority),  # 1 (low) → 5 (urgent)
+            "Tags": "robot,warning"
+        }
+
         requests.post(
-            "https://api.pushover.net/1/messages.json",
-            data={
-                "token": Config.PUSHOVER_TOKEN,
-                "user": Config.PUSHOVER_USER,
-                "message": text
-            }
+            ntfy_url,
+            data=text.encode("utf-8"),
+            headers=headers,
+            timeout=5
         )
         logger.info(f"Push notification sent: {text[:50]}...")
         return "✅ Push notification sent"
