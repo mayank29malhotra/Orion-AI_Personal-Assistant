@@ -1,8 +1,10 @@
 .env
 .venv/
+google_cred/
 venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+.venv/
