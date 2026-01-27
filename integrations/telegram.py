@@ -520,6 +520,130 @@ def start_telegram_server(host="0.0.0.0", port=8000):
     uvicorn.run(app, host=host, port=port)
 
 
+# ============ Long Polling Mode (for HuggingFace Spaces) ============
+
+async def start_polling():
+    """
+    Start Telegram bot in long polling mode.
+    This is better for HuggingFace Spaces since we can't run a separate webhook server.
+    """
+    if not TG_API:
+        logger.error("Telegram Bot Token not configured - polling disabled")
+        return
+    
+    if not ALLOWED_USER_ID:
+        logger.error("=" * 60)
+        logger.error("🚨 SECURITY ERROR: TELEGRAM_ALLOWED_USER_ID is not set!")
+        logger.error("The bot will BLOCK ALL users until you configure this.")
+        logger.error("=" * 60)
+        return
+    
+    # Initialize
+    init_database()
+    logger.info(f"🔒 Security: Bot restricted to user ID(s): {ALLOWED_USER_ID}")
+    logger.info("🤖 Starting Telegram bot in polling mode...")
+    
+    # Delete any existing webhook to use polling
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(f"{TG_API}/deleteWebhook")
+            logger.info("Cleared existing webhook for polling mode")
+        except Exception as e:
+            logger.warning(f"Could not clear webhook: {e}")
+    
+    # Get Orion instance ready
+    try:
+        await get_orion_instance()
+    except Exception as e:
+        logger.error(f"Failed to initialize Orion: {e}")
+        return
+    
+    offset = 0
+    poll_timeout = 30  # Long polling timeout
+    
+    logger.info("✅ Telegram polling started - listening for messages...")
+    
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=poll_timeout + 10) as client:
+                response = await client.get(
+                    f"{TG_API}/getUpdates",
+                    params={
+                        "offset": offset,
+                        "timeout": poll_timeout,
+                        "allowed_updates": ["message"]
+                    }
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"Polling error: {response.status_code}")
+                    await asyncio.sleep(5)
+                    continue
+                
+                data = response.json()
+                
+                if not data.get("ok"):
+                    logger.error(f"Telegram API error: {data}")
+                    await asyncio.sleep(5)
+                    continue
+                
+                updates = data.get("result", [])
+                
+                for update in updates:
+                    offset = update["update_id"] + 1
+                    
+                    if "message" not in update:
+                        continue
+                    
+                    message_data = update["message"]
+                    chat_id = str(message_data["chat"]["id"])
+                    user_id = message_data["from"]["id"]
+                    
+                    # Security check
+                    if not is_user_allowed(user_id):
+                        continue
+                    
+                    text = message_data.get("text", "")
+                    if not text:
+                        await send_telegram_message(chat_id, "Please send a text message.")
+                        continue
+                    
+                    logger.info(f"Received message from {user_id}: {text[:50]}...")
+                    log_message(chat_id, "incoming", text[:500])
+                    
+                    # Handle commands
+                    if text.startswith("/"):
+                        parts = text.split(maxsplit=1)
+                        command = parts[0].lower()
+                        args = parts[1] if len(parts) > 1 else ""
+                        await handle_command(chat_id, command, args)
+                        continue
+                    
+                    # Save task and process
+                    task_id = save_task(chat_id, str(user_id), text)
+                    await send_telegram_message(chat_id, "📝 *Processing your request...*")
+                    
+                    # Process in background task
+                    asyncio.create_task(process_telegram_task(chat_id, text, task_id))
+                
+        except asyncio.CancelledError:
+            logger.info("Telegram polling cancelled")
+            break
+        except httpx.TimeoutException:
+            # Normal timeout, continue polling
+            continue
+        except Exception as e:
+            logger.error(f"Polling error: {e}")
+            await asyncio.sleep(5)
+    
+    logger.info("Telegram polling stopped")
+
+
+async def main():
+    """Main entry point for Telegram bot (polling mode)."""
+    await start_polling()
+
+
 if __name__ == "__main__":
     import argparse
     
