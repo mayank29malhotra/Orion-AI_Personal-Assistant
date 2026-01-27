@@ -57,3 +57,8 @@ google-search-results>=2.4.2
 # Additional utilities
 pyperclip>=1.8.2  # Clipboard operations (future use)
 
+# WhatsApp Integration
+twilio>=8.10.0  # Twilio API for WhatsApp
+flask>=3.0.0  # Webhook server for receiving messages
+pywin32>=306  # Windows service support
+
