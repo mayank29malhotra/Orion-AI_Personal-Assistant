@@ -1,3 +1,15 @@
+---
+title: Orion AI Assistant
+emoji: 🌟
+colorFrom: purple
+colorTo: blue
+sdk: gradio
+sdk_version: "5.23.3"
+python_version: "3.11"
+app_file: app_both.py
+pinned: false
+---
+
 # 🌟 Orion AI Personal Assistant
 
 An advanced AI-powered personal assistant with **35+ tools** across multiple categories including email management, calendar integration, document processing, web automation, and much more!
