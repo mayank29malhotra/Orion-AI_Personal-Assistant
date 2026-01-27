@@ -6,13 +6,14 @@ Web search, Wikipedia, and Python REPL.
 import logging
 from typing import Optional
 
-from langchain_core.tools.simple import Tool
+from langchain_core.tools import tool
 
 logger = logging.getLogger("Orion")
 
 
 # ============ WEB SEARCH ============
 
+@tool
 def web_search(query: str, num_results: int = 5) -> str:
     """
     Search the web using DuckDuckGo.
@@ -48,6 +49,7 @@ def web_search(query: str, num_results: int = 5) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def fetch_webpage(url: str) -> str:
     """
     Fetch and extract text content from a webpage.
@@ -91,6 +93,7 @@ def fetch_webpage(url: str) -> str:
 
 # ============ WIKIPEDIA ============
 
+@tool
 def wikipedia_search(query: str, sentences: int = 5) -> str:
     """
     Search Wikipedia and get a summary.
@@ -135,6 +138,7 @@ def wikipedia_search(query: str, sentences: int = 5) -> str:
 
 # ============ PYTHON REPL ============
 
+@tool
 def python_repl(code: str) -> str:
     """
     Execute Python code and return the result.
@@ -212,30 +216,14 @@ def python_repl(code: str) -> str:
 def get_search_tools():
     """Get all search-related tools."""
     return [
-        Tool(
-            name="web_search",
-            func=web_search,
-            description="Search the web using DuckDuckGo. Args: query, num_results (optional, default 5)"
-        ),
-        Tool(
-            name="fetch_webpage",
-            func=fetch_webpage,
-            description="Fetch and extract text from a webpage. Args: url"
-        ),
-        Tool(
-            name="wikipedia_search",
-            func=wikipedia_search,
-            description="Search Wikipedia for information. Args: query, sentences (optional, default 5)"
-        ),
+        web_search,
+        fetch_webpage,
+        wikipedia_search,
     ]
 
 
 def get_repl_tools():
     """Get Python REPL tool."""
     return [
-        Tool(
-            name="python_repl",
-            func=python_repl,
-            description="Execute Python code. Args: code (Python code string). Returns output or error."
-        ),
+        python_repl,
     ]

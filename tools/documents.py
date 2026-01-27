@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 from pathlib import Path
 
-from langchain_core.tools.simple import Tool
+from langchain_core.tools import tool
 
 logger = logging.getLogger("Orion")
 
@@ -26,6 +26,7 @@ def _ensure_data_dir():
 
 # ============ PDF TOOLS ============
 
+@tool
 def extract_pdf_text(file_path: str) -> str:
     """
     Extract text from a PDF file.
@@ -68,6 +69,7 @@ def extract_pdf_text(file_path: str) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def create_pdf(content: str, output_path: str, title: str = "Document") -> str:
     """
     Create a PDF from text content.
@@ -129,6 +131,7 @@ def create_pdf(content: str, output_path: str, title: str = "Document") -> str:
 
 # ============ OCR TOOLS ============
 
+@tool
 def ocr_image(image_path: str) -> str:
     """
     Extract text from an image using OCR.
@@ -162,6 +165,7 @@ def ocr_image(image_path: str) -> str:
 
 # ============ CSV TOOLS ============
 
+@tool
 def read_csv(file_path: str, limit: int = 100) -> str:
     """
     Read a CSV file and return its contents.
@@ -197,7 +201,8 @@ def read_csv(file_path: str, limit: int = 100) -> str:
         return f"❌ {error_msg}"
 
 
-def write_csv(data: str, output_path: str, headers: str = None) -> str:
+@tool
+def write_csv(data: str, output_path: str, headers: Optional[str] = None) -> str:
     """
     Write data to a CSV file.
     
@@ -242,7 +247,8 @@ def write_csv(data: str, output_path: str, headers: str = None) -> str:
 
 # ============ EXCEL TOOLS ============
 
-def read_excel(file_path: str, sheet_name: str = None, limit: int = 100) -> str:
+@tool
+def read_excel(file_path: str, sheet_name: Optional[str] = None, limit: int = 100) -> str:
     """
     Read an Excel file.
     
@@ -281,6 +287,7 @@ def read_excel(file_path: str, sheet_name: str = None, limit: int = 100) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def write_excel(data: str, output_path: str, sheet_name: str = "Sheet1") -> str:
     """
     Write data to an Excel file.
@@ -317,6 +324,7 @@ def write_excel(data: str, output_path: str, sheet_name: str = "Sheet1") -> str:
 
 # ============ JSON TOOLS ============
 
+@tool
 def read_json(file_path: str) -> str:
     """
     Read a JSON file.
@@ -345,6 +353,7 @@ def read_json(file_path: str) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def write_json(data: str, output_path: str) -> str:
     """
     Write data to a JSON file.
@@ -375,7 +384,8 @@ def write_json(data: str, output_path: str) -> str:
 
 # ============ MARKDOWN TOOLS ============
 
-def markdown_to_html(markdown_text: str, output_path: str = None) -> str:
+@tool
+def markdown_to_html(markdown_text: str, output_path: Optional[str] = None) -> str:
     """
     Convert markdown to HTML.
     
@@ -429,7 +439,8 @@ def markdown_to_html(markdown_text: str, output_path: str = None) -> str:
 
 # ============ QR CODE ============
 
-def generate_qr_code(data: str, output_path: str = None) -> str:
+@tool
+def generate_qr_code(data: str, output_path: Optional[str] = None) -> str:
     """
     Generate a QR code image.
     
@@ -473,97 +484,53 @@ def generate_qr_code(data: str, output_path: str = None) -> str:
 def get_pdf_tools():
     """Get PDF-related tools."""
     return [
-        Tool(
-            name="extract_pdf_text",
-            func=extract_pdf_text,
-            description="Extract text from a PDF file. Args: file_path"
-        ),
-        Tool(
-            name="create_pdf",
-            func=create_pdf,
-            description="Create a PDF from text content. Args: content, output_path, title (optional)"
-        ),
+        extract_pdf_text,
+        create_pdf,
     ]
 
 
 def get_ocr_tools():
     """Get OCR tools."""
     return [
-        Tool(
-            name="ocr_image",
-            func=ocr_image,
-            description="Extract text from an image using OCR. Args: image_path"
-        ),
+        ocr_image,
     ]
 
 
 def get_csv_tools():
     """Get CSV-related tools."""
     return [
-        Tool(
-            name="read_csv",
-            func=read_csv,
-            description="Read a CSV file. Args: file_path, limit (optional, default 100)"
-        ),
-        Tool(
-            name="write_csv",
-            func=write_csv,
-            description="Write data to CSV. Args: data (JSON array), output_path, headers (optional)"
-        ),
+        read_csv,
+        write_csv,
     ]
 
 
 def get_excel_tools():
     """Get Excel-related tools."""
     return [
-        Tool(
-            name="read_excel",
-            func=read_excel,
-            description="Read an Excel file. Args: file_path, sheet_name (optional), limit (optional)"
-        ),
-        Tool(
-            name="write_excel",
-            func=write_excel,
-            description="Write data to Excel. Args: data (JSON), output_path, sheet_name (optional)"
-        ),
+        read_excel,
+        write_excel,
     ]
 
 
 def get_json_tools():
     """Get JSON-related tools."""
     return [
-        Tool(
-            name="read_json",
-            func=read_json,
-            description="Read a JSON file. Args: file_path"
-        ),
-        Tool(
-            name="write_json",
-            func=write_json,
-            description="Write JSON to file. Args: data (JSON string), output_path"
-        ),
+        read_json,
+        write_json,
     ]
 
 
 def get_markdown_tools():
     """Get Markdown tools."""
     return [
-        Tool(
-            name="markdown_to_html",
-            func=markdown_to_html,
-            description="Convert markdown to HTML. Args: markdown_text, output_path (optional)"
-        ),
+        markdown_to_html,
     ]
 
 
 def get_qr_tools():
     """Get QR code tools."""
     return [
-        Tool(
-            name="generate_qr_code",
-            func=generate_qr_code,
-            description="Generate a QR code image. Args: data (text/URL), output_path (optional)"
-        ),
+        generate_qr_code,
     ]
 
 

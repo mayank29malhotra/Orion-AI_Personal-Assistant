@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from langchain_core.tools.simple import Tool
+from langchain_core.tools import tool
 
 logger = logging.getLogger("Orion")
 
@@ -103,10 +103,11 @@ def generate_token():
         print(f.read())
 
 
+@tool
 def create_calendar_event(
     title: str,
     start_time: str,
-    end_time: str = None,
+    end_time: Optional[str] = None,
     description: str = "",
     location: str = ""
 ) -> str:
@@ -174,6 +175,7 @@ def create_calendar_event(
         return f"❌ {error_msg}"
 
 
+@tool
 def list_calendar_events(days_ahead: int = 7, max_results: int = 10) -> str:
     """
     List upcoming calendar events.
@@ -231,6 +233,7 @@ def list_calendar_events(days_ahead: int = 7, max_results: int = 10) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def delete_calendar_event(event_id: str) -> str:
     """
     Delete a calendar event by ID.
@@ -257,19 +260,7 @@ def delete_calendar_event(event_id: str) -> str:
 def get_calendar_tools():
     """Get all calendar-related tools."""
     return [
-        Tool(
-            name="create_calendar_event",
-            func=create_calendar_event,
-            description="Create a Google Calendar event. Args: title, start_time (ISO format), end_time (optional), description (optional), location (optional)"
-        ),
-        Tool(
-            name="list_calendar_events",
-            func=list_calendar_events,
-            description="List upcoming calendar events. Args: days_ahead (default 7), max_results (default 10)"
-        ),
-        Tool(
-            name="delete_calendar_event",
-            func=delete_calendar_event,
-            description="Delete a calendar event. Args: event_id (Google Calendar event ID)"
-        ),
+        create_calendar_event,
+        list_calendar_events,
+        delete_calendar_event,
     ]
