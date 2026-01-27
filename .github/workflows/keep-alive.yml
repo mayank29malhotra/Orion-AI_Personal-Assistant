@@ -1,0 +1,51 @@
+# HuggingFace Space Keep-Alive Workflow
+# Pings the HF Space every 5 minutes to prevent it from sleeping
+# Works with private Spaces (uses HF token for authentication)
+
+name: Keep HF Space Alive
+
+on:
+  schedule:
+    # Run every 5 minutes
+    - cron: '*/5 * * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Ping HuggingFace Space
+        env:
+          HF_SPACE_URL: ${{ secrets.HF_SPACE_URL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          echo "Pinging HuggingFace Space..."
+          
+          # Ping with authentication for private Spaces
+          if [ -n "$HF_TOKEN" ]; then
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $HF_TOKEN" \
+              "$HF_SPACE_URL" || echo "000")
+          else
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HF_SPACE_URL" || echo "000")
+          fi
+          
+          echo "Response code: $RESPONSE"
+          
+          if [ "$RESPONSE" = "200" ] || [ "$RESPONSE" = "302" ]; then
+            echo "✅ Space is alive!"
+          elif [ "$RESPONSE" = "000" ]; then
+            echo "⚠️ Could not reach Space (might be starting up)"
+          else
+            echo "⚠️ Space returned $RESPONSE"
+          fi
+          
+          # Always exit 0 to avoid failing the workflow
+          exit 0
+
+      - name: Log timestamp
+        run: |
+          echo "Ping completed at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"

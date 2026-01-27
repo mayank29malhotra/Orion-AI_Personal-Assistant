@@ -1,3 +1,8 @@
+"""
+Orion AI Agent - Core Agent Module
+LangGraph-based agent with worker-evaluator pattern.
+"""
+
 # Disable SSL warnings and LangSmith tracing before imports
 import os
 os.environ['LANGSMITH_TRACING'] = 'false'
@@ -9,7 +14,7 @@ import warnings
 import urllib3
 warnings.filterwarnings('ignore', category=urllib3.exceptions.InsecureRequestWarning)
 
-from typing import Annotated
+from typing import Annotated, List, Any, Optional, Dict
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -18,18 +23,20 @@ from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from typing import List, Any, Optional, Dict
 from pydantic import BaseModel, Field
 import uuid
 import asyncio
+import time
 from datetime import datetime
-from config import Config
-from utils import logger, retry_on_error, async_retry_on_error
+
+from core.config import Config
+from core.utils import logger, RateLimiter, async_retry_on_error
 
 load_dotenv(override=True)
 
 
 class State(TypedDict):
+    """Agent state for LangGraph workflow."""
     messages: Annotated[List[Any], add_messages]
     success_criteria: str
     feedback_on_work: Optional[str]
@@ -38,6 +45,7 @@ class State(TypedDict):
 
 
 class EvaluatorOutput(BaseModel):
+    """Structured output from the evaluator LLM."""
     feedback: str = Field(description="Feedback on the assistant's response")
     success_criteria_met: bool = Field(description="Whether the success criteria have been met")
     user_input_needed: bool = Field(
@@ -46,6 +54,11 @@ class EvaluatorOutput(BaseModel):
 
 
 class Orion:
+    """
+    Main Orion AI Agent.
+    Uses a worker-evaluator pattern with LangGraph for robust task completion.
+    """
+    
     def __init__(self):
         self.worker_llm_with_tools = None
         self.evaluator_llm_with_output = None
@@ -57,22 +70,38 @@ class Orion:
         self.browser = None
         self.playwright = None
         self.tool_usage_count = 0
+        
+        # Rate limiting for LLM calls (protect free tier limits)
+        self.llm_rate_limiter = RateLimiter(
+            max_calls=Config.LLM_REQUESTS_PER_MINUTE,
+            period=60
+        )
+        self.last_llm_call = 0
+        
+        # Conversation memory (persistent)
+        self.conversation_memory = None
+        
         logger.info(f"Orion instance created with ID: {self.orion_id}")
 
     @async_retry_on_error(max_retries=2, delay=1.0)
     async def setup(self):
+        """Initialize Orion with LLMs, tools, and graph."""
         import ssl
         import httpx
         from langchain_google_genai import ChatGoogleGenerativeAI
-        from tools_enhanced import get_all_tools
+        from tools import get_all_tools
+        from core.memory import ConversationMemory
         
         logger.info("Starting Orion setup...")
+        
+        # Initialize persistent conversation memory
+        self.conversation_memory = ConversationMemory()
+        logger.info("Persistent memory initialized")
         
         # Ensure required directories exist
         Config.ensure_directories()
         
         # Get proxy settings from environment if available
-        http_proxy = os.getenv('HTTP_PROXY') or os.getenv('http_proxy')
         https_proxy = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
         
         # Create HTTP client with SSL verification completely disabled
@@ -122,45 +151,45 @@ class Orion:
         logger.info("Orion setup completed successfully")
 
     def worker(self, state: State) -> Dict[str, Any]:
+        """Worker node: processes tasks using tools."""
         system_message = f"""You are a helpful assistant that can use tools to complete tasks.
-    You keep working on a task until either you have a question or clarification for the user, or the success criteria is met.
-    You have access to 35+ powerful tools across multiple categories:
-    
-    - Email Management: Send and read emails
-    - Calendar: Create and manage Google Calendar events
-    - Tasks & Reminders: Create, list, and complete tasks
-    - Notes: Create and search notes
-    - Screenshots: Capture screenshots
-    - PDF: Read and create PDF files
-    - OCR: Extract text from images
-    - Data: Read/write CSV, Excel, JSON files
-    - Markdown: Convert between Markdown and HTML
-    - QR Codes: Generate QR codes
-    - Web: Browse websites, search, Wikipedia
-    - Python: Execute Python code
-    - Files: Full file management
-    
-    The current date and time is {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+You keep working on a task until either you have a question or clarification for the user, or the success criteria is met.
+You have access to 35+ powerful tools across multiple categories:
 
-    This is the success criteria:
-    {state["success_criteria"]}
-    You should reply either with a question for the user about this assignment, or with your final response.
-    If you have a question for the user, you need to reply by clearly stating your question. An example might be:
+- Email Management: Send and read emails
+- Calendar: Create and manage Google Calendar events
+- Tasks & Reminders: Create, list, and complete tasks
+- Notes: Create and search notes
+- Screenshots: Capture screenshots
+- PDF: Read and create PDF files
+- OCR: Extract text from images
+- Data: Read/write CSV, Excel, JSON files
+- Markdown: Convert between Markdown and HTML
+- QR Codes: Generate QR codes
+- Web: Browse websites, search, Wikipedia
+- Python: Execute Python code
+- Files: Full file management
 
-    Question: please clarify whether you want a summary or a detailed answer
+The current date and time is {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-    If you've finished, reply with the final answer, and don't ask a question; simply reply with the answer.
-    """
+This is the success criteria:
+{state["success_criteria"]}
+You should reply either with a question for the user about this assignment, or with your final response.
+If you have a question for the user, you need to reply by clearly stating your question. An example might be:
+
+Question: please clarify whether you want a summary or a detailed answer
+
+If you've finished, reply with the final answer, and don't ask a question; simply reply with the answer.
+"""
 
         if state.get("feedback_on_work"):
             system_message += f"""
-    Previously you thought you completed the assignment, but your reply was rejected because the success criteria was not met.
-    Here is the feedback on why this was rejected:
-    {state["feedback_on_work"]}
-    With this feedback, please continue the assignment, ensuring that you meet the success criteria or have a question for the user."""
+Previously you thought you completed the assignment, but your reply was rejected because the success criteria was not met.
+Here is the feedback on why this was rejected:
+{state["feedback_on_work"]}
+With this feedback, please continue the assignment, ensuring that you meet the success criteria or have a question for the user."""
 
         # Add in the system message
-
         found_system_message = False
         messages = state["messages"]
         for message in messages:
@@ -171,6 +200,9 @@ class Orion:
         if not found_system_message:
             messages = [SystemMessage(content=system_message)] + messages
 
+        # Rate limiting: wait if needed to avoid hitting free tier limits
+        self._apply_rate_limit_sync()
+        
         # Invoke the LLM with tools
         try:
             response = self.worker_llm_with_tools.invoke(messages)
@@ -187,6 +219,7 @@ class Orion:
             return {"messages": [error_message]}
 
     def worker_router(self, state: State) -> str:
+        """Route worker output to tools or evaluator."""
         last_message = state["messages"][-1]
 
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
@@ -195,6 +228,7 @@ class Orion:
             return "evaluator"
 
     def format_conversation(self, messages: List[Any]) -> str:
+        """Format conversation history for evaluator."""
         conversation = "Conversation history:\n\n"
         for message in messages:
             if isinstance(message, HumanMessage):
@@ -205,30 +239,31 @@ class Orion:
         return conversation
 
     def evaluator(self, state: State) -> State:
+        """Evaluator node: assesses if task is complete."""
         last_response = state["messages"][-1].content
 
         system_message = """You are an evaluator that determines if a task has been completed successfully by an Assistant.
-    Assess the Assistant's last response based on the given criteria. Respond with your feedback, and with your decision on whether the success criteria has been met,
-    and whether more input is needed from the user."""
+Assess the Assistant's last response based on the given criteria. Respond with your feedback, and with your decision on whether the success criteria has been met,
+and whether more input is needed from the user."""
 
         user_message = f"""You are evaluating a conversation between the User and Assistant. You decide what action to take based on the last response from the Assistant.
 
-    The entire conversation with the assistant, with the user's original request and all replies, is:
-    {self.format_conversation(state["messages"])}
+The entire conversation with the assistant, with the user's original request and all replies, is:
+{self.format_conversation(state["messages"])}
 
-    The success criteria for this assignment is:
-    {state["success_criteria"]}
+The success criteria for this assignment is:
+{state["success_criteria"]}
 
-    And the final response from the Assistant that you are evaluating is:
-    {last_response}
+And the final response from the Assistant that you are evaluating is:
+{last_response}
 
-    Respond with your feedback, and decide if the success criteria is met by this response.
-    Also, decide if more user input is required, either because the assistant has a question, needs clarification, or seems to be stuck and unable to answer without help.
+Respond with your feedback, and decide if the success criteria is met by this response.
+Also, decide if more user input is required, either because the assistant has a question, needs clarification, or seems to be stuck and unable to answer without help.
 
-    The Assistant has access to a tool to write files. If the Assistant says they have written a file, then you can assume they have done so.
-    Overall you should give the Assistant the benefit of the doubt if they say they've done something. But you should reject if you feel that more work should go into this.
+The Assistant has access to a tool to write files. If the Assistant says they have written a file, then you can assume they have done so.
+Overall you should give the Assistant the benefit of the doubt if they say they've done something. But you should reject if you feel that more work should go into this.
 
-    """
+"""
         if state["feedback_on_work"]:
             user_message += f"Also, note that in a prior attempt from the Assistant, you provided this feedback: {state['feedback_on_work']}\n"
             user_message += "If you're seeing the Assistant repeating the same mistakes, then consider responding that user input is required."
@@ -253,13 +288,14 @@ class Orion:
         return new_state
 
     def route_based_on_evaluation(self, state: State) -> str:
+        """Route based on evaluator decision."""
         if state["success_criteria_met"] or state["user_input_needed"]:
             return "END"
         else:
             return "worker"
 
     async def build_graph(self):
-        # Set up Graph Builder with State
+        """Build the LangGraph workflow."""
         graph_builder = StateGraph(State)
 
         # Add nodes
@@ -280,7 +316,60 @@ class Orion:
         # Compile the graph
         self.graph = graph_builder.compile(checkpointer=self.memory)
 
-    async def run_superstep(self, message, success_criteria, history):
+    def _apply_rate_limit_sync(self):
+        """Apply rate limiting to protect free tier LLM limits (sync version)."""
+        # Check if we need to wait based on rate limiter
+        if not self.llm_rate_limiter.check("llm"):
+            wait_time = self.llm_rate_limiter.wait_time("llm")
+            if wait_time > 0:
+                logger.info(f"Rate limit reached, waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
+        
+        # Also apply minimum cooldown between calls
+        elapsed = time.time() - self.last_llm_call
+        if elapsed < Config.LLM_COOLDOWN_SECONDS:
+            wait = Config.LLM_COOLDOWN_SECONDS - elapsed
+            logger.debug(f"Cooldown: waiting {wait:.1f}s before next LLM call")
+            time.sleep(wait)
+        
+        self.last_llm_call = time.time()
+
+    async def _apply_rate_limit(self):
+        """Apply rate limiting to protect free tier LLM limits (async version)."""
+        # Check if we need to wait based on rate limiter
+        if not self.llm_rate_limiter.check("llm"):
+            wait_time = self.llm_rate_limiter.wait_time("llm")
+            if wait_time > 0:
+                logger.info(f"Rate limit reached, waiting {wait_time:.1f}s...")
+                await asyncio.sleep(wait_time)
+        
+        # Also apply minimum cooldown between calls
+        elapsed = time.time() - self.last_llm_call
+        if elapsed < Config.LLM_COOLDOWN_SECONDS:
+            wait = Config.LLM_COOLDOWN_SECONDS - elapsed
+            logger.debug(f"Cooldown: waiting {wait:.1f}s before next LLM call")
+            await asyncio.sleep(wait)
+        
+        self.last_llm_call = time.time()
+
+    async def run_superstep(
+        self,
+        message: str,
+        success_criteria: str,
+        history: List,
+        user_id: str = None,
+        channel: str = "default"
+    ):
+        """
+        Run a superstep with optional memory persistence.
+        
+        Args:
+            message: The user's message
+            success_criteria: Criteria for evaluating success
+            history: Conversation history
+            user_id: Optional user ID for persistent memory
+            channel: Channel name (telegram, email, api, etc.)
+        """
         config = {"configurable": {"thread_id": self.orion_id}}
 
         state = {
@@ -293,24 +382,65 @@ class Orion:
         
         try:
             logger.info(f"Running superstep for message: {message[:50]}...")
+            
+            # Save user message to persistent memory if user_id provided
+            if user_id and self.conversation_memory:
+                self.conversation_memory.add_message(
+                    user_id=user_id,
+                    channel=channel,
+                    role="user",
+                    content=message
+                )
+            
             result = await self.graph.ainvoke(state, config=config)
             
             # Extract the assistant's reply from the result
             assistant_message = result["messages"][-2].content if len(result["messages"]) >= 2 else "No response"
+            
+            # Save assistant response to persistent memory
+            if user_id and self.conversation_memory:
+                self.conversation_memory.add_message(
+                    user_id=user_id,
+                    channel=channel,
+                    role="assistant",
+                    content=assistant_message
+                )
             
             logger.info("Superstep completed successfully")
             # Return in tuple format: (user_message, assistant_message)
             return history + [[message, assistant_message]]
         except Exception as e:
             logger.error(f"Error in run_superstep: {str(e)}")
-            error_msg = f"I apologize, but I encountered an error: {str(e)}"
+            
+            # Add to retry queue if user_id is provided
+            if user_id:
+                from core.memory import retry_queue
+                retry_queue.add_failed_request(
+                    user_id=user_id,
+                    channel=channel,
+                    message=message,
+                    error=str(e)
+                )
+                error_msg = f"I encountered an error and will retry in {Config.RETRY_DELAY_MINUTES} minutes. Error: {str(e)}"
+            else:
+                error_msg = f"I apologize, but I encountered an error: {str(e)}"
+            
             return history + [[message, error_msg]]
     
+    def get_conversation_history(self, user_id: str, channel: str = None, limit: int = None) -> List[Dict]:
+        """Get persistent conversation history for a user."""
+        if not self.conversation_memory:
+            return []
+        
+        limit = limit or Config.MEMORY_HISTORY_LIMIT
+        return self.conversation_memory.get_formatted_history(user_id, channel, limit)
+    
     def get_tool_usage_count(self) -> int:
-        """Get the number of tools used in this session"""
+        """Get the number of tools used in this session."""
         return self.tool_usage_count
 
     def cleanup(self):
+        """Clean up resources (browser, playwright)."""
         logger.info("Cleaning up Orion resources...")
         if self.browser:
             try:

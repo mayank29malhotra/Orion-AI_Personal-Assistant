@@ -57,8 +57,15 @@ google-search-results>=2.4.2
 # Additional utilities
 pyperclip>=1.8.2  # Clipboard operations (future use)
 
-# WhatsApp Integration
-twilio>=8.10.0  # Twilio API for WhatsApp
-flask>=3.0.0  # Webhook server for receiving messages
-pywin32>=306  # Windows service support
+# ============================================
+# MULTI-CHANNEL INTEGRATIONS
+# ============================================
+
+# Telegram Integration
+httpx>=0.24.0  # Async HTTP client for Telegram API
+fastapi>=0.109.0  # Webhook server for receiving messages
+uvicorn>=0.27.0  # ASGI server for FastAPI
+
+# Windows-only (optional)
+# pywin32>=306  # Windows service support
 
