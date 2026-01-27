@@ -543,13 +543,24 @@ async def start_polling():
     logger.info(f"🔒 Security: Bot restricted to user ID(s): {ALLOWED_USER_ID}")
     logger.info("🤖 Starting Telegram bot in polling mode...")
     
-    # Delete any existing webhook to use polling
-    async with httpx.AsyncClient() as client:
+    # Wait for network to be ready (HF Spaces can take a moment)
+    await asyncio.sleep(5)
+    
+    # Delete any existing webhook to use polling (with retry)
+    webhook_cleared = False
+    for attempt in range(3):
         try:
-            await client.post(f"{TG_API}/deleteWebhook")
-            logger.info("Cleared existing webhook for polling mode")
+            async with httpx.AsyncClient(timeout=30) as client:
+                await client.post(f"{TG_API}/deleteWebhook")
+                logger.info("Cleared existing webhook for polling mode")
+                webhook_cleared = True
+                break
         except Exception as e:
-            logger.warning(f"Could not clear webhook: {e}")
+            if attempt < 2:
+                logger.warning(f"Could not clear webhook (attempt {attempt + 1}/3): {e}")
+                await asyncio.sleep(10)
+            else:
+                logger.warning(f"Could not clear webhook after 3 attempts: {e}")
     
     # Get Orion instance ready
     try:
@@ -560,6 +571,8 @@ async def start_polling():
     
     offset = 0
     poll_timeout = 30  # Long polling timeout
+    consecutive_errors = 0
+    max_backoff = 300  # Max 5 minutes between retries
     
     logger.info("✅ Telegram polling started - listening for messages...")
     
@@ -575,16 +588,19 @@ async def start_polling():
                     }
                 )
                 
+                # Reset error counter on successful request
+                consecutive_errors = 0
+                
                 if response.status_code != 200:
-                    logger.error(f"Polling error: {response.status_code}")
-                    await asyncio.sleep(5)
+                    logger.error(f"Polling error: HTTP {response.status_code}")
+                    await asyncio.sleep(10)
                     continue
                 
                 data = response.json()
                 
                 if not data.get("ok"):
                     logger.error(f"Telegram API error: {data}")
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(10)
                     continue
                 
                 updates = data.get("result", [])
@@ -632,9 +648,21 @@ async def start_polling():
         except httpx.TimeoutException:
             # Normal timeout, continue polling
             continue
+        except (OSError, httpx.ConnectError, httpx.NetworkError) as e:
+            # Network/DNS errors - use exponential backoff
+            consecutive_errors += 1
+            backoff = min(5 * (2 ** consecutive_errors), max_backoff)
+            
+            # Only log every few errors to avoid spam
+            if consecutive_errors <= 3 or consecutive_errors % 10 == 0:
+                logger.warning(f"Network error (attempt {consecutive_errors}): {e}. Retrying in {backoff}s...")
+            
+            await asyncio.sleep(backoff)
         except Exception as e:
-            logger.error(f"Polling error: {e}")
-            await asyncio.sleep(5)
+            consecutive_errors += 1
+            backoff = min(10 * consecutive_errors, 60)
+            logger.error(f"Polling error: {e}. Retrying in {backoff}s...")
+            await asyncio.sleep(backoff)
     
     logger.info("Telegram polling stopped")
 
