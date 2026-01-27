@@ -1,15 +1,3 @@
----
-title: Orion AI Assistant
-emoji: 🌟
-colorFrom: purple
-colorTo: blue
-sdk: gradio
-sdk_version: "5.23.3"
-python_version: "3.11"
-app_file: app_both.py
-pinned: false
----
-
 # 🌟 Orion AI Personal Assistant
 
 An advanced AI-powered personal assistant with **35+ tools** across multiple categories including email management, calendar integration, document processing, web automation, and much more!
@@ -30,9 +18,9 @@ An advanced AI-powered personal assistant with **35+ tools** across multiple cat
 - **⏱️ Rate Limiting**: Automatic throttling for LLM free tier limits
 - **🔄 Auto-Retry Queue**: Failed requests retry automatically (2 attempts, 5 min apart)
 - **📢 Multi-Channel Notifications**: Get notified on all channels if something fails
-- **☁️ HuggingFace Spaces Ready**: Persistent storage works with `/data` directory
+- **☁️ Cloud Ready**: Deploy anywhere (Oracle Cloud Free, Docker, VPS)
 - **📋 Pending Request Queue**: Queries are saved when bot is down, processed when back online
-- **💓 Keep-Alive System**: Built-in self-ping + GitHub Actions cron to prevent HF sleep
+- **💓 Keep-Alive System**: Built-in self-ping for always-on deployment
 
 ### 🔧 35+ Powerful Tools
 
@@ -453,108 +441,199 @@ Access at: `http://localhost:7860`
 
 ---
 
-## ☁️ Deploy to HuggingFace Spaces (Free)
+## ☁️ Deploy to Oracle Cloud VM (FREE Forever)
 
-Run Orion for free on HuggingFace Spaces with automatic GitHub sync!
+Run Orion 24/7 on Oracle Cloud's **Always Free** tier - completely FREE, not a trial!
 
-### 🚀 Quick Setup (5 min)
+### Why Oracle Cloud Free Tier?
+| Feature | Oracle Free | AWS/GCP/Azure Free |
+|---------|-------------|-------------------|
+| Duration | ♾️ Forever | 12-month trial |
+| RAM | Up to 24 GB | 1 GB |
+| Storage | 200 GB total | Limited |
+| Always On | ✅ Yes | ❌ Sleep after idle |
+| Network | ✅ Full access | ✅ Full access |
 
-#### Step 1: Create HuggingFace Space
-1. Go to [huggingface.co/spaces](https://huggingface.co/spaces)
-2. Click **"Create new Space"**
-3. Name: `orion-ai`, SDK: **Gradio**, Hardware: **CPU Basic** (free)
+### 🚀 Step-by-Step Deployment
 
-#### Step 2: Set Up GitHub Auto-Sync
-Add these **GitHub Secrets** (Repo → Settings → Secrets → Actions):
+#### Step 1: Create Oracle Cloud Account
+1. Go to [cloud.oracle.com/free](https://www.oracle.com/cloud/free/)
+2. Click **"Start for Free"**
+3. Complete signup (requires credit card for verification - you won't be charged)
+4. Wait for account activation (can take 15-30 minutes)
 
-| Secret | Value |
-|--------|-------|
-| `HF_TOKEN` | Your HF write token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| `HF_USERNAME` | Your HuggingFace username |
-| `HF_SPACE_NAME` | `orion-ai` |
+#### Step 2: Create VM Instance
+1. Go to **Compute → Instances → Create Instance**
+2. Configure:
+   - **Name:** `orion-server`
+   - **Compartment:** (default)
+   - **Image:** Ubuntu 22.04 (click "Change Image" → Ubuntu → 22.04)
+   - **Shape:** Click "Change Shape" → **Ampere** → `VM.Standard.A1.Flex`
+     - OCPUs: 2 (free up to 4)
+     - Memory: 12 GB (free up to 24 GB)
+   - **Networking:** Create new VCN or use existing
+   - **Add SSH keys:** Generate or upload your SSH public key
 
-Every push to `main` automatically deploys to HuggingFace!
+3. Click **Create** and wait for instance to be running
 
-#### Step 3: Set HuggingFace Secrets
-In HF Space → **Settings → Variables and secrets**:
+#### Step 3: Configure Firewall
+1. Go to **Networking → Virtual Cloud Networks** → Select your VCN
+2. Click **Security Lists** → **Default Security List**
+3. Click **Add Ingress Rules**:
+   - **Source CIDR:** `0.0.0.0/0`
+   - **Destination Port Range:** `7860` (for Gradio)
+   - Click **Add**
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `GROQ_API_KEY` | ✅ Yes | Groq LLM API key |
-| `GEMINI_API_KEY` | ✅ Yes | Google Gemini API key |
-| `SERPER_API_KEY` | ✅ Yes | Web search API key |
-| `EMAIL_ADDRESS` | Optional | Your Gmail address |
-| `EMAIL_PASSWORD` | Optional | Gmail App Password (not regular password!) |
-| `GOOGLE_CALENDAR_TOKEN_JSON` | Optional | Paste entire `token.json` content (see below) |
-| `NTFY_TOPIC` | Optional | Push notification topic |
+#### Step 4: SSH into VM and Install
+Copy your VM's **Public IP** from the instance details, then:
 
-#### Step 4: Enable Google Calendar (Optional)
-1. Run locally to generate token:
-   ```bash
-   python -c "from tools.calendar import generate_token; generate_token()"
-   ```
-2. Copy the JSON output
-3. Paste as `GOOGLE_CALENDAR_TOKEN_JSON` secret in HF Space
+```bash
+# SSH into VM (replace with your IP)
+ssh ubuntu@YOUR_VM_IP
 
-### ✅ Features on HuggingFace
-- 📧 **Email**: ✅ Works (uses SMTP with App Password)
-- 📅 **Calendar**: ✅ Works (with token secret)
-- 🧠 **Memory**: ✅ Persistent (stored in `/data`)
-- 🔍 **Web Search**: ✅ Works
-- 📝 **Notes/Tasks**: ✅ Persistent
+# Update system
+sudo apt update && sudo apt upgrade -y
 
----
+# Install Python 3.11 and dependencies
+sudo apt install -y python3.11 python3.11-venv python3.11-dev git
 
-## ☁️ Deploy to Oracle Cloud VM (Free Forever)
+# Install system dependencies for Playwright and OCR
+sudo apt install -y wget tesseract-ocr tesseract-ocr-eng poppler-utils
 
-Run Orion 24/7 on Oracle Cloud's **Always Free** tier and access via Telegram!
+# Clone your repository
+git clone https://github.com/YOUR_USERNAME/Orion-AI_Personal-Assistant.git
+cd Orion-AI_Personal-Assistant
 
-### Cost: **$0/month FOREVER** (not a trial!)
+# Create virtual environment
+python3.11 -m venv .venv
+source .venv/bin/activate
 
-### Why Oracle Cloud?
-- Google/AWS/Azure "free tiers" are 90-day or 12-month **trials**
-- Oracle Cloud Always Free is **truly free forever**
-- Get up to **4 ARM cores + 24GB RAM** for free!
+# Install Python dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
 
-### Quick Deployment Steps
+# Install Playwright (for browser automation)
+playwright install chromium
+playwright install-deps chromium
+```
 
-1. **Create Oracle Cloud account** at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/)
+#### Step 5: Configure Environment Variables
+```bash
+# Create .env file
+nano .env
+```
 
-2. **Create VM:**
-   - **Shape:** VM.Standard.A1.Flex (ARM - 2 OCPUs, 12GB RAM)
-   - **Image:** Ubuntu 22.04
-   - **Storage:** 50 GB
+Add your API keys:
+```env
+# Required
+GROQ_API_KEY=your_groq_api_key
+GEMINI_API_KEY=your_gemini_api_key
+SERPER_API_KEY=your_serper_api_key
 
-3. **Setup VM:**
-   ```bash
-   # Install dependencies
-   sudo apt update && sudo apt install -y python3.11 python3.11-venv git
-   
-   # Clone your repo
-   git clone YOUR_REPO_URL orion && cd orion
-   
-   # Setup Python environment
-   python3.11 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   playwright install chromium
-   ```
+# Telegram Bot
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_ALLOWED_USER_ID=your_telegram_user_id
 
-4. **Configure & Run:**
-   ```bash
-   # Create .env file with your keys
-   nano .env
-   
-   # Set Telegram webhook (use Cloudflare Tunnel for free HTTPS)
-   python telegram_integration.py --set-webhook https://your-domain/telegram/webhook
-   ```
+# Email (Gmail with App Password)
+EMAIL_ADDRESS=your_email@gmail.com
+EMAIL_PASSWORD=your_gmail_app_password
+IMAP_SERVER=imap.gmail.com
+SMTP_SERVER=smtp.gmail.com
 
-### 📖 Full Guide
-See **[TELEGRAM_DEPLOYMENT.md](TELEGRAM_DEPLOYMENT.md)** for complete step-by-step instructions including:
-- Oracle Cloud VM setup
-- Cloudflare Tunnel setup (free HTTPS)
-- Systemd service configuration
-- Security best practices
+# Push Notifications (optional)
+NTFY_TOPIC=your_ntfy_topic
+
+# Data directory
+ORION_DATA_DIR=/home/ubuntu/Orion-AI_Personal-Assistant/data
+```
+
+Save with `Ctrl+X`, then `Y`, then `Enter`.
+
+#### Step 6: Test Run
+```bash
+# Activate venv and test
+source .venv/bin/activate
+python app_both.py
+```
+
+Access at: `http://YOUR_VM_IP:7860`
+
+Test Telegram bot by sending `/start` to your bot.
+
+#### Step 7: Setup Systemd Service (Auto-start)
+```bash
+# Create service file
+sudo nano /etc/systemd/system/orion.service
+```
+
+Paste this content:
+```ini
+[Unit]
+Description=Orion AI Assistant
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Orion-AI_Personal-Assistant
+Environment="PATH=/home/ubuntu/Orion-AI_Personal-Assistant/.venv/bin:/usr/bin"
+EnvironmentFile=/home/ubuntu/Orion-AI_Personal-Assistant/.env
+ExecStart=/home/ubuntu/Orion-AI_Personal-Assistant/.venv/bin/python app_both.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save and enable:
+```bash
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable auto-start on boot
+sudo systemctl enable orion
+
+# Start the service
+sudo systemctl start orion
+
+# Check status
+sudo systemctl status orion
+
+# View logs
+sudo journalctl -u orion -f
+```
+
+### ✅ What's Working
+
+| Feature | Status |
+|---------|--------|
+| 🌐 Gradio Web UI | ✅ `http://YOUR_IP:7860` |
+| 🤖 Telegram Bot | ✅ Polling mode |
+| 📬 Email Bot | ✅ IMAP monitoring |
+| ⏰ Scheduler | ✅ Background tasks |
+| 🧠 Persistent Memory | ✅ SQLite in data/ |
+| 🔄 Auto-restart | ✅ Systemd |
+
+### 🔧 Useful Commands
+```bash
+# Check service status
+sudo systemctl status orion
+
+# Restart service
+sudo systemctl restart orion
+
+# View live logs
+sudo journalctl -u orion -f
+
+# Stop service
+sudo systemctl stop orion
+
+# Update code
+cd ~/Orion-AI_Personal-Assistant
+git pull
+sudo systemctl restart orion
+```
 
 ---
 
