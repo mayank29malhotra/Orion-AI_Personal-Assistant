@@ -7,8 +7,9 @@ import os
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from langchain_core.tools.simple import Tool
+from langchain_core.tools import tool
 
 logger = logging.getLogger("Orion")
 
@@ -22,7 +23,8 @@ def _ensure_data_dir():
     return DATA_DIR
 
 
-def take_screenshot(output_path: str = None, region: str = None) -> str:
+@tool
+def take_screenshot(output_path: Optional[str] = None, region: Optional[str] = None) -> str:
     """
     Take a screenshot of the screen.
     
@@ -62,6 +64,7 @@ def take_screenshot(output_path: str = None, region: str = None) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def send_push_notification(title: str, message: str) -> str:
     """
     Send a desktop push notification.
@@ -128,6 +131,7 @@ def send_push_notification(title: str, message: str) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def get_system_info() -> str:
     """Get system information."""
     try:
@@ -177,6 +181,7 @@ def get_system_info() -> str:
         return f"❌ Failed to get system info: {str(e)}"
 
 
+@tool
 def list_directory(path: str = ".") -> str:
     """
     List contents of a directory.
@@ -229,7 +234,8 @@ def list_directory(path: str = ".") -> str:
         return f"❌ {error_msg}"
 
 
-def read_file(file_path: str) -> str:
+@tool
+def read_file_content(file_path: str) -> str:
     """
     Read contents of a text file.
     
@@ -268,7 +274,8 @@ def read_file(file_path: str) -> str:
         return f"❌ {error_msg}"
 
 
-def write_file(file_path: str, content: str) -> str:
+@tool
+def write_file_content(file_path: str, content: str) -> str:
     """
     Write content to a file.
     
@@ -297,48 +304,24 @@ def write_file(file_path: str, content: str) -> str:
 def get_screenshot_tools():
     """Get screenshot tools."""
     return [
-        Tool(
-            name="take_screenshot",
-            func=take_screenshot,
-            description="Take a screenshot. Args: output_path (optional), region (optional, format: x,y,width,height)"
-        ),
+        take_screenshot,
     ]
 
 
 def get_notification_tools():
     """Get notification tools."""
     return [
-        Tool(
-            name="send_push_notification",
-            func=send_push_notification,
-            description="Send a desktop notification. Args: title, message"
-        ),
+        send_push_notification,
     ]
 
 
 def get_system_tools():
     """Get system utility tools."""
     return [
-        Tool(
-            name="get_system_info",
-            func=get_system_info,
-            description="Get system information (OS, CPU, memory, disk)"
-        ),
-        Tool(
-            name="list_directory",
-            func=list_directory,
-            description="List contents of a directory. Args: path (default: current directory)"
-        ),
-        Tool(
-            name="read_file",
-            func=read_file,
-            description="Read contents of a text file. Args: file_path"
-        ),
-        Tool(
-            name="write_file",
-            func=write_file,
-            description="Write content to a file. Args: file_path, content"
-        ),
+        get_system_info,
+        list_directory,
+        read_file_content,
+        write_file_content,
     ]
 
 

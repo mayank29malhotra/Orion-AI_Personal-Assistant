@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 from pathlib import Path
 
-from langchain_core.tools.simple import Tool
+from langchain_core.tools import tool
 
 logger = logging.getLogger("Orion")
 
@@ -55,10 +55,11 @@ def _save_tasks(tasks: list):
         json.dump(tasks, f, indent=2, default=str)
 
 
+@tool
 def create_task(
     title: str,
     description: str = "",
-    due_date: str = None,
+    due_date: Optional[str] = None,
     priority: str = "medium"
 ) -> str:
     """
@@ -102,7 +103,8 @@ def create_task(
         return f"❌ {error_msg}"
 
 
-def list_tasks(show_completed: bool = False, priority: str = None) -> str:
+@tool
+def list_tasks(show_completed: bool = False, priority: Optional[str] = None) -> str:
     """
     List all tasks.
     
@@ -154,6 +156,7 @@ def list_tasks(show_completed: bool = False, priority: str = None) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def complete_task(task_id: int) -> str:
     """
     Mark a task as completed.
@@ -184,6 +187,7 @@ def complete_task(task_id: int) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def delete_task(task_id: int) -> str:
     """
     Delete a task.
@@ -210,6 +214,7 @@ def delete_task(task_id: int) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def create_note(title: str, content: str, tags: str = "") -> str:
     """
     Create a new note.
@@ -260,6 +265,7 @@ tags: [{', '.join(tags_list)}]
         return f"❌ {error_msg}"
 
 
+@tool
 def list_notes() -> str:
     """List all notes."""
     try:
@@ -283,6 +289,7 @@ def list_notes() -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def read_note(title: str) -> str:
     """
     Read a note by title.
@@ -317,6 +324,7 @@ def read_note(title: str) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def search_notes(query: str) -> str:
     """
     Search notes by content or tags.
@@ -364,6 +372,7 @@ def search_notes(query: str) -> str:
         return f"❌ {error_msg}"
 
 
+@tool
 def delete_note(title: str) -> str:
     """
     Delete a note by title.
@@ -397,55 +406,19 @@ def delete_note(title: str) -> str:
 def get_task_tools():
     """Get all task-related tools."""
     return [
-        Tool(
-            name="create_task",
-            func=create_task,
-            description="Create a new task. Args: title, description (optional), due_date (YYYY-MM-DD, optional), priority (low/medium/high)"
-        ),
-        Tool(
-            name="list_tasks",
-            func=list_tasks,
-            description="List all tasks. Args: show_completed (True/False), priority (low/medium/high filter)"
-        ),
-        Tool(
-            name="complete_task",
-            func=complete_task,
-            description="Mark a task as completed. Args: task_id (integer)"
-        ),
-        Tool(
-            name="delete_task",
-            func=delete_task,
-            description="Delete a task. Args: task_id (integer)"
-        ),
+        create_task,
+        list_tasks,
+        complete_task,
+        delete_task,
     ]
 
 
 def get_note_tools():
     """Get all note-related tools."""
     return [
-        Tool(
-            name="create_note",
-            func=create_note,
-            description="Create a new markdown note. Args: title, content, tags (comma-separated, optional)"
-        ),
-        Tool(
-            name="list_notes",
-            func=list_notes,
-            description="List all notes"
-        ),
-        Tool(
-            name="read_note",
-            func=read_note,
-            description="Read a note by title. Args: title (without .md extension)"
-        ),
-        Tool(
-            name="search_notes",
-            func=search_notes,
-            description="Search notes by content or tags. Args: query"
-        ),
-        Tool(
-            name="delete_note",
-            func=delete_note,
-            description="Delete a note. Args: title (without .md extension)"
-        ),
+        create_note,
+        list_notes,
+        read_note,
+        search_notes,
+        delete_note,
     ]

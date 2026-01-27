@@ -14,7 +14,7 @@ from email import encoders
 from datetime import datetime
 from typing import Optional
 
-from langchain_core.tools.simple import Tool
+from langchain_core.tools import tool
 
 import logging
 
@@ -27,7 +27,8 @@ def _get_config():
     return Config
 
 
-def send_email(to: str, subject: str, body: str, attachment_path: str = None) -> str:
+@tool
+def send_email(to: str, subject: str, body: str, attachment_path: Optional[str] = None) -> str:
     """
     Send an email via SMTP.
     
@@ -77,6 +78,7 @@ def send_email(to: str, subject: str, body: str, attachment_path: str = None) ->
         return f"❌ {error_msg}"
 
 
+@tool
 def read_recent_emails(count: int = 5, unread_only: bool = False) -> str:
     """
     Read recent emails via IMAP.
@@ -147,14 +149,6 @@ def read_recent_emails(count: int = 5, unread_only: bool = False) -> str:
 def get_email_tools():
     """Get all email-related tools."""
     return [
-        Tool(
-            name="send_email",
-            func=send_email,
-            description="Send an email. Args: to (email address), subject (email subject), body (email body), attachment_path (optional file path)"
-        ),
-        Tool(
-            name="read_recent_emails",
-            func=read_recent_emails,
-            description="Read recent emails. Args: count (number of emails, default 5), unread_only (True/False)"
-        ),
+        send_email,
+        read_recent_emails,
     ]
