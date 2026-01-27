@@ -1,6 +1,6 @@
 """
 Utility functions for Orion AI Personal Assistant
-Includes logging, caching, rate limiting, and error handling
+Includes logging, caching, rate limiting, and error handling.
 """
 import logging
 import time
@@ -12,7 +12,10 @@ import traceback
 
 
 class Logger:
-    """Enhanced logging system"""
+    """
+    Enhanced logging system with console and file output.
+    Singleton pattern for consistent logging across modules.
+    """
     
     _instance = None
     
@@ -29,6 +32,10 @@ class Logger:
         self._initialized = True
         self.logger = logging.getLogger("Orion")
         self.logger.setLevel(logging.INFO)
+        
+        # Prevent duplicate handlers
+        if self.logger.handlers:
+            return
         
         # Console handler
         console_handler = logging.StreamHandler()
@@ -63,6 +70,9 @@ class Logger:
     
     def debug(self, message: str):
         self.logger.debug(message)
+    
+    def critical(self, message: str):
+        self.logger.critical(message)
 
 
 # Global logger instance
@@ -70,7 +80,7 @@ logger = Logger()
 
 
 class Cache:
-    """Simple in-memory cache with TTL"""
+    """Simple in-memory cache with TTL."""
     
     def __init__(self, ttl_seconds: int = 300):
         self.cache: Dict[str, tuple[Any, float]] = {}
@@ -88,12 +98,19 @@ class Cache:
     def set(self, key: str, value: Any):
         self.cache[key] = (value, time.time())
     
+    def delete(self, key: str):
+        if key in self.cache:
+            del self.cache[key]
+    
     def clear(self):
         self.cache.clear()
+    
+    def size(self) -> int:
+        return len(self.cache)
 
 
 class RateLimiter:
-    """Rate limiting for API calls"""
+    """Rate limiting for API calls."""
     
     def __init__(self, max_calls: int = 60, period: int = 60):
         self.max_calls = max_calls
@@ -101,7 +118,7 @@ class RateLimiter:
         self.calls: Dict[str, list] = defaultdict(list)
     
     def check(self, key: str = "default") -> bool:
-        """Check if rate limit is exceeded"""
+        """Check if rate limit is exceeded."""
         now = time.time()
         # Remove old calls
         self.calls[key] = [
@@ -116,7 +133,7 @@ class RateLimiter:
         return True
     
     def wait_time(self, key: str = "default") -> float:
-        """Get wait time in seconds before next call is allowed"""
+        """Get wait time in seconds before next call is allowed."""
         if not self.calls[key]:
             return 0.0
         
@@ -127,6 +144,15 @@ class RateLimiter:
             return 0.0
         
         return self.period - time_passed
+    
+    def remaining(self, key: str = "default") -> int:
+        """Get remaining calls allowed in current period."""
+        now = time.time()
+        self.calls[key] = [
+            call_time for call_time in self.calls[key]
+            if now - call_time < self.period
+        ]
+        return max(0, self.max_calls - len(self.calls[key]))
 
 
 # Global cache and rate limiter
@@ -135,7 +161,7 @@ rate_limiter = RateLimiter(max_calls=60, period=60)
 
 
 def retry_on_error(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
-    """Decorator for retrying functions on error"""
+    """Decorator for retrying functions on error."""
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -161,7 +187,7 @@ def retry_on_error(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.
 
 
 def async_retry_on_error(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
-    """Decorator for retrying async functions on error"""
+    """Decorator for retrying async functions on error."""
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
@@ -188,9 +214,7 @@ def async_retry_on_error(max_retries: int = 3, delay: float = 1.0, backoff: floa
 
 
 def safe_execute(func: Callable, *args, **kwargs) -> tuple[bool, Any]:
-    """
-    Safely execute a function and return (success, result_or_error)
-    """
+    """Safely execute a function and return (success, result_or_error)."""
     try:
         result = func(*args, **kwargs)
         return True, result
@@ -201,9 +225,7 @@ def safe_execute(func: Callable, *args, **kwargs) -> tuple[bool, Any]:
 
 
 async def async_safe_execute(func: Callable, *args, **kwargs) -> tuple[bool, Any]:
-    """
-    Safely execute an async function and return (success, result_or_error)
-    """
+    """Safely execute an async function and return (success, result_or_error)."""
     try:
         result = await func(*args, **kwargs)
         return True, result
@@ -214,10 +236,24 @@ async def async_safe_execute(func: Callable, *args, **kwargs) -> tuple[bool, Any
 
 
 def format_error_message(error: Exception, context: str = "") -> str:
-    """Format error message for user display"""
+    """Format error message for user display."""
     error_type = type(error).__name__
     error_msg = str(error)
     
     if context:
         return f"❌ Error in {context}: {error_type} - {error_msg}"
     return f"❌ {error_type}: {error_msg}"
+
+
+def format_timestamp(dt: datetime = None) -> str:
+    """Format datetime for display."""
+    if dt is None:
+        dt = datetime.now()
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def truncate_text(text: str, max_length: int = 500, suffix: str = "...") -> str:
+    """Truncate text to max length."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length - len(suffix)] + suffix

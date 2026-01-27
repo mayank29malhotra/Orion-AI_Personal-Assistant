@@ -1,7 +1,27 @@
+import os
 import gradio as gr
-from orion import Orion
+from core.agent import Orion
 import json
 from datetime import datetime
+
+# HuggingFace Spaces detection and setup
+IS_HF_SPACE = os.path.exists("/data") or os.getenv("SPACE_ID")
+
+# Configure paths for HF Spaces persistent storage
+if IS_HF_SPACE:
+    # HuggingFace provides /data for persistent storage
+    DATA_DIR = "/data"
+    os.makedirs(f"{DATA_DIR}/sandbox", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/sandbox/data", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/sandbox/notes", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/sandbox/tasks", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/sandbox/temp", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/sandbox/screenshots", exist_ok=True)
+    # Set environment variable for core modules to use
+    os.environ["ORION_DATA_DIR"] = DATA_DIR
+    print(f"🚀 Running on HuggingFace Spaces - Data dir: {DATA_DIR}")
+else:
+    print("🖥️ Running locally")
 
 
 # Store session statistics
@@ -10,6 +30,9 @@ session_stats = {
     "tools_used": 0,
     "session_start": None
 }
+
+# Default user ID for Gradio (in HF Spaces, we use a session-based ID)
+DEFAULT_USER_ID = os.getenv("HF_USER_ID", "gradio_user")
 
 
 async def setup():
@@ -38,7 +61,14 @@ async def process_message(orion, message, success_criteria, history, upload_file
                 file_context += f"- {file.name}\n"
             message = message + file_context
         
-        results = await orion.run_superstep(message, success_criteria, history)
+        # Run with memory persistence
+        results = await orion.run_superstep(
+            message,
+            success_criteria,
+            history,
+            user_id=DEFAULT_USER_ID,
+            channel="gradio"
+        )
         
         # Update statistics
         session_stats["messages_sent"] += 1
@@ -250,4 +280,15 @@ with gr.Blocks(title="Orion AI Assistant", css=custom_css, theme=gr.themes.Soft(
     )
 
 
-ui.launch(inbrowser=True, share=False)
+# Launch without authentication for HF Spaces (public access)
+# Authentication is handled by HuggingFace if needed
+if __name__ == "__main__":
+    ui.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=False,
+        show_error=True
+    )
+else:
+    # When imported (e.g., by HF Spaces)
+    ui.launch()

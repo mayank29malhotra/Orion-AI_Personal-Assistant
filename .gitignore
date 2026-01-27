@@ -1,10 +1,49 @@
+# Environment and secrets
 .env
+.env.local
+.env.production
+
+# Python virtual environments
 .venv/
-google_cred/
 venv/
+env/
+.Python
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-.venv/
+.pytest_cache/
+
+# Google credentials (sensitive)
+google_cred/
+credentials.json
+token.json
+
+# Memory and data files (persistent data)
+sandbox/data/*.db
+orion_memory.db
+orion_retry_queue.db
+scheduled_tasks.db
+
+# Logs
+*.log
+orion.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# HuggingFace persistent storage is at /data
+# These will be created at runtime
+sandbox/notes/
+sandbox/tasks/
+sandbox/screenshots/
+sandbox/temp/
