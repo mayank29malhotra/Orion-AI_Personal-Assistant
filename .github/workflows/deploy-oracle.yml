@@ -1,0 +1,25 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Deploy to Oracle VM
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.ORACLE_VM_IP }}
+        username: opc
+        key: ${{ secrets.ORACLE_SSH_KEY }}
+        script: |
+          cd ~/Orion-AI_Personal-Assistant
+          git pull origin main
+          source .venv/bin/activate
+          pip install -r requirements.txt --quiet
+          sudo systemctl restart orion
+          echo "✅ Deployed successfully at $(date)"
