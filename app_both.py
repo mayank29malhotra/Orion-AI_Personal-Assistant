@@ -9,12 +9,21 @@ import threading
 import logging
 import time
 
+# Force unbuffered output for SSH sessions
+os.environ['PYTHONUNBUFFERED'] = '1'
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout,
+    force=True
 )
 logger = logging.getLogger("Orion")
+
+# Detect if running on Hugging Face Spaces
+IS_HF_SPACE = os.getenv("SPACE_ID") is not None
 
 # Data directory - use ORION_DATA_DIR env var or default to ./data
 DATA_DIR = os.getenv("ORION_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
@@ -26,6 +35,7 @@ os.makedirs(f"{DATA_DIR}/sandbox/temp", exist_ok=True)
 os.makedirs(f"{DATA_DIR}/sandbox/screenshots", exist_ok=True)
 os.environ["ORION_DATA_DIR"] = DATA_DIR
 logger.info(f"🚀 Orion starting - Data dir: {DATA_DIR}")
+sys.stdout.flush()
 
 
 # ============ Background Services ============
@@ -272,7 +282,7 @@ with gr.Blocks(title="Orion AI Assistant", css=custom_css, theme=gr.themes.Soft(
     
     with gr.Row():
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(label="💬 Conversation", height=400, type="tuples")
+            chatbot = gr.Chatbot(label="💬 Conversation", height=400)
             
             with gr.Group():
                 message = gr.Textbox(placeholder="💭 What would you like help with?", lines=2, show_label=False)
@@ -298,8 +308,13 @@ with gr.Blocks(title="Orion AI Assistant", css=custom_css, theme=gr.themes.Soft(
     export_button.click(export_conversation, [chatbot], [export_status])
 
 
-# Launch
+# Launch with authentication
+GRADIO_USER = os.environ.get("GRADIO_USER", "")
+GRADIO_PASS = os.environ.get("GRADIO_PASS", "")
+
+auth = (GRADIO_USER, GRADIO_PASS) if GRADIO_USER and GRADIO_PASS else None
+
 if __name__ == "__main__":
-    ui.launch(server_name="0.0.0.0", server_port=7860, share=False, show_error=True)
+    ui.launch(server_name="0.0.0.0", server_port=7860, share=False, show_error=True, auth=auth)
 else:
-    ui.launch()
+    ui.launch(auth=auth)

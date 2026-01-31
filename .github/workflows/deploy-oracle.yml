@@ -18,8 +18,21 @@ jobs:
         key: ${{ secrets.ORACLE_SSH_KEY }}
         script: |
           cd ~/Orion-AI_Personal-Assistant
+          
+          # Pull latest code
           git pull origin main
-          source .venv/bin/activate
-          pip install -r requirements.txt --quiet
-          sudo systemctl restart orion
+          
+          # Rebuild container (data is in external volume - preserved)
+          podman stop orion || true
+          podman rm orion || true
+          podman build -t orion .
+          
+          # Restart headless (no port needed - Telegram/Email only)
+          podman run -d --name orion \
+            --env-file .env \
+            -v $(pwd)/data:/app/data:Z \
+            --restart=always \
+            orion
+          
           echo "✅ Deployed successfully at $(date)"
+          podman ps

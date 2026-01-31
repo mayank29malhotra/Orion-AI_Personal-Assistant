@@ -49,14 +49,9 @@ COPY . .
 # Create data directory (will be mounted as volume for persistence)
 RUN mkdir -p /app/data/sandbox/data /app/data/sandbox/notes /app/data/sandbox/tasks /app/data/sandbox/temp /app/data/sandbox/screenshots
 
-# Expose port for Gradio
-EXPOSE 7860
-
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV GRADIO_SERVER_NAME=0.0.0.0
-ENV GRADIO_SERVER_PORT=7860
 ENV ORION_DATA_DIR=/app/data
 
-# Run the application
-CMD ["python", "app_both.py"]
+# Run headless mode (Telegram + Email + Scheduler only)
+CMD ["python", "app_headless.py"]
