@@ -88,7 +88,6 @@ class Orion:
         """Initialize Orion with LLMs, tools, and graph."""
         import ssl
         import httpx
-        from langchain_google_genai import ChatGoogleGenerativeAI
         from tools import get_all_tools
         from core.memory import ConversationMemory
         
@@ -140,9 +139,13 @@ class Orion:
         logger.info("Worker LLM initialized")
         self.worker_llm_with_tools = worker_llm.bind_tools(self.tools)
 
-        evaluator_llm = ChatGoogleGenerativeAI(
+        evaluator_llm = ChatOpenAI(
             model=Config.EVALUATOR_MODEL,
-            google_api_key=Config.GEMINI_API_KEY
+            base_url=GROQ_BASE_URL,
+            api_key=Config.GROQ_API_KEY,
+            http_client=http_client,
+            http_async_client=async_http_client,
+            max_retries=2
         )
         self.evaluator_llm_with_output = evaluator_llm.with_structured_output(EvaluatorOutput)
         logger.info("Evaluator LLM initialized")
