@@ -65,7 +65,7 @@ class Config:
     
     # ============ Model Configuration ============
     WORKER_MODEL = os.getenv("WORKER_MODEL", "llama-3.3-70b-versatile")
-    EVALUATOR_MODEL = os.getenv("EVALUATOR_MODEL", "gemini-2.5-flash-lite")
+    EVALUATOR_MODEL = os.getenv("EVALUATOR_MODEL", "gemini-2.0-flash")
     
     # ============ Telegram Integration ============
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
