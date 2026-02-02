@@ -64,8 +64,9 @@ class Config:
     MEMORY_PRUNE_DAYS = int(os.getenv("MEMORY_PRUNE_DAYS", "30"))  # Days before pruning old messages
     
     # ============ Model Configuration ============
+    # Both use llama-3.3-70b-versatile (supports tool calling + structured output)
     WORKER_MODEL = os.getenv("WORKER_MODEL", "llama-3.3-70b-versatile")
-    EVALUATOR_MODEL = os.getenv("EVALUATOR_MODEL", "llama-3.1-8b-instant")
+    EVALUATOR_MODEL = os.getenv("EVALUATOR_MODEL", "llama-3.3-70b-versatile")
     
     # ============ Telegram Integration ============
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
