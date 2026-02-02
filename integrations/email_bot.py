@@ -19,9 +19,24 @@ import email
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
+from email import policy
+from email.parser import BytesParser
 import asyncio
 from datetime import datetime
 from typing import Optional, List, Tuple
+import codecs
+
+# Register unknown-8bit as latin-1 fallback
+try:
+    codecs.lookup('unknown-8bit')
+except LookupError:
+    codecs.register_error('unknown-8bit', lambda e: ('?', e.end))
+    # Create alias for unknown-8bit
+    def unknown_8bit_search(name):
+        if name == 'unknown-8bit':
+            return codecs.lookup('latin-1')
+        return None
+    codecs.register(unknown_8bit_search)
 
 # Add parent directory for core imports
 import sys
@@ -137,29 +152,34 @@ def check_for_commands() -> List[Tuple[str, str, str, str]]:
             return commands
         
         for msg_id in messages[0].split():
-            status, msg_data = mail.fetch(msg_id, "(RFC822)")
-            
-            if status != "OK":
+            try:
+                status, msg_data = mail.fetch(msg_id, "(RFC822)")
+                
+                if status != "OK":
+                    continue
+                
+                raw_email = msg_data[0][1]
+                # Use lenient policy to handle unknown encodings
+                msg = BytesParser(policy=policy.compat32).parsebytes(raw_email)
+                
+                subject = decode_email_subject(msg.get("Subject", ""))
+                
+                # Check if it's an Orion command
+                if subject.upper().startswith(COMMAND_PREFIX):
+                    sender = get_sender_email(msg)
+                    body = get_email_body(msg)
+                    
+                    # The command is either in subject (after prefix) or in body
+                    command = subject[len(COMMAND_PREFIX):].strip()
+                    if not command and body:
+                        command = body
+                    
+                    if command:
+                        commands.append((msg_id.decode(), sender, subject, command))
+                        logger.info(f"Email command from {sender}: {command[:50]}...")
+            except Exception as e:
+                logger.debug(f"Skipping email {msg_id}: {e}")
                 continue
-            
-            raw_email = msg_data[0][1]
-            msg = email.message_from_bytes(raw_email)
-            
-            subject = decode_email_subject(msg.get("Subject", ""))
-            
-            # Check if it's an Orion command
-            if subject.upper().startswith(COMMAND_PREFIX):
-                sender = get_sender_email(msg)
-                body = get_email_body(msg)
-                
-                # The command is either in subject (after prefix) or in body
-                command = subject[len(COMMAND_PREFIX):].strip()
-                if not command and body:
-                    command = body
-                
-                if command:
-                    commands.append((msg_id.decode(), sender, subject, command))
-                    logger.info(f"Email command from {sender}: {command[:50]}...")
         
         mail.logout()
         
