@@ -3,6 +3,7 @@ Search & Web Tools for Orion
 Web search, Wikipedia, and Python REPL.
 """
 
+import os
 import logging
 from typing import Optional
 
@@ -10,41 +11,112 @@ from langchain_core.tools import tool
 
 logger = logging.getLogger("Orion")
 
+# Check for Serper API key
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
+
 
 # ============ WEB SEARCH ============
 
 @tool
 def web_search(query: str, num_results: int = 5) -> str:
     """
-    Search the web using DuckDuckGo.
+    Search the web for information using Google via Serper API.
     
     Args:
         query: Search query
         num_results: Number of results (default 5)
     """
+    if not SERPER_API_KEY:
+        return "❌ SERPER_API_KEY not configured. Please set it in your environment variables."
+    
     try:
-        from duckduckgo_search import DDGS
+        import httpx
         
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=num_results))
+        response = httpx.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"},
+            json={"q": query, "num": num_results},
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
         
+        results = data.get("organic", [])
         if not results:
-            return f"🔍 No results found for: {query}"
+            return f"🔍 No results found for: {query}. Try using browser_search for more comprehensive results."
         
-        output = [f"🔍 Search results for: {query}\n"]
-        for i, result in enumerate(results, 1):
+        output = [f"🔍 Google search results for: {query}\n"]
+        for i, result in enumerate(results[:num_results], 1):
             output.append(f"{i}. **{result.get('title', 'No title')}**")
-            output.append(f"   🔗 {result.get('href', 'No URL')}")
-            output.append(f"   {result.get('body', 'No description')[:200]}...")
+            output.append(f"   🔗 {result.get('link', 'No URL')}")
+            output.append(f"   {result.get('snippet', 'No description')[:200]}")
             output.append("")
         
-        logger.info(f"Web search: {query} ({len(results)} results)")
+        logger.info(f"Google search (Serper): {query} ({len(results)} results)")
         return "\n".join(output)
-    
-    except ImportError:
-        return "❌ duckduckgo_search not installed. Install with: pip install duckduckgo-search"
+        
     except Exception as e:
-        error_msg = f"Web search failed: {str(e)}"
+        error_msg = f"Web search failed: {str(e)}. Try using browser_search for a fallback."
+        logger.error(error_msg)
+        return f"❌ {error_msg}"
+
+
+@tool
+def browser_search(query: str) -> str:
+    """
+    Search the web using a real browser (Playwright). Use this as fallback when web_search fails,
+    or when you need to access dynamic content that requires JavaScript.
+    
+    Args:
+        query: Search query
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            
+            # Use Google search
+            search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+            page.goto(search_url, timeout=30000)
+            page.wait_for_load_state("domcontentloaded")
+            
+            # Extract search results
+            results = []
+            search_results = page.query_selector_all("div.g")[:5]
+            
+            for result in search_results:
+                try:
+                    title_el = result.query_selector("h3")
+                    link_el = result.query_selector("a")
+                    snippet_el = result.query_selector("div[data-sncf]") or result.query_selector("span")
+                    
+                    title = title_el.inner_text() if title_el else "No title"
+                    link = link_el.get_attribute("href") if link_el else "No URL"
+                    snippet = snippet_el.inner_text()[:200] if snippet_el else "No description"
+                    
+                    results.append({"title": title, "link": link, "snippet": snippet})
+                except:
+                    continue
+            
+            browser.close()
+            
+            if not results:
+                return f"🔍 No results found for: {query}"
+            
+            output = [f"🌐 Browser search results for: {query}\n"]
+            for i, result in enumerate(results, 1):
+                output.append(f"{i}. **{result['title']}**")
+                output.append(f"   🔗 {result['link']}")
+                output.append(f"   {result['snippet']}")
+                output.append("")
+            
+            logger.info(f"Browser search: {query} ({len(results)} results)")
+            return "\n".join(output)
+            
+    except Exception as e:
+        error_msg = f"Browser search failed: {str(e)}"
         logger.error(error_msg)
         return f"❌ {error_msg}"
 
@@ -217,6 +289,7 @@ def get_search_tools():
     """Get all search-related tools."""
     return [
         web_search,
+        browser_search,
         fetch_webpage,
         wikipedia_search,
     ]
