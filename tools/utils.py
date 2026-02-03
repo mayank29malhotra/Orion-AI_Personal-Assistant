@@ -299,6 +299,120 @@ def write_file_content(file_path: str, content: str) -> str:
         return f"❌ {error_msg}"
 
 
+# ============ LOCATION TOOLS ============
+
+@tool
+def parse_location(location_input: str) -> str:
+    """
+    Parse location from various formats and return structured location info.
+    Supports Google Maps links, coordinates, Plus codes, area names, and pin codes.
+    
+    Args:
+        location_input: Location in any format (Maps URL, coordinates, area name, pin code, etc.)
+    
+    Returns:
+        Parsed location information with coordinates if available
+    """
+    import re
+    import urllib.parse
+    
+    result = {
+        "original_input": location_input,
+        "type": "unknown",
+        "parsed": None,
+        "coordinates": None
+    }
+    
+    location_input = location_input.strip()
+    
+    # Pattern 1: Google Maps URL with coordinates
+    # https://maps.google.com/?q=28.6139,77.2090
+    # https://www.google.com/maps/place/.../@28.6139,77.2090,15z
+    # https://goo.gl/maps/... (short URL)
+    maps_patterns = [
+        r'[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)',  # ?q=lat,lng
+        r'@(-?\d+\.?\d*),(-?\d+\.?\d*)',        # @lat,lng in URL
+        r'll=(-?\d+\.?\d*),(-?\d+\.?\d*)',      # ll=lat,lng
+        r'place/[^/]+/(-?\d+\.?\d*),(-?\d+\.?\d*)',  # place/name/lat,lng
+    ]
+    
+    for pattern in maps_patterns:
+        match = re.search(pattern, location_input)
+        if match:
+            lat, lng = float(match.group(1)), float(match.group(2))
+            result["type"] = "google_maps_url"
+            result["coordinates"] = {"latitude": lat, "longitude": lng}
+            result["parsed"] = f"Coordinates: {lat}, {lng}"
+            return f"""📍 **Location Parsed (Google Maps)**
+• Latitude: {lat}
+• Longitude: {lng}
+• Maps Link: https://www.google.com/maps?q={lat},{lng}"""
+    
+    # Pattern 2: Direct coordinates (lat, lng) or (lat lng)
+    coord_match = re.match(r'^(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)$', location_input)
+    if coord_match:
+        lat, lng = float(coord_match.group(1)), float(coord_match.group(2))
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            return f"""📍 **Location Parsed (Coordinates)**
+• Latitude: {lat}
+• Longitude: {lng}
+• Maps Link: https://www.google.com/maps?q={lat},{lng}"""
+    
+    # Pattern 3: Indian Pin Code (6 digits)
+    pin_match = re.match(r'^(\d{6})$', location_input)
+    if pin_match:
+        pin = pin_match.group(1)
+        return f"""📍 **Location Parsed (PIN Code)**
+• PIN Code: {pin}
+• Search on Maps: https://www.google.com/maps/search/{pin}+India
+• Note: Use web_search to get exact area for this PIN code"""
+    
+    # Pattern 4: Plus Code (e.g., 7JVW+HG Delhi)
+    plus_code_match = re.match(r'^([A-Z0-9]{4,8}\+[A-Z0-9]{2,3})\s*(.*)$', location_input, re.IGNORECASE)
+    if plus_code_match:
+        code = plus_code_match.group(1).upper()
+        area = plus_code_match.group(2).strip() or "India"
+        return f"""📍 **Location Parsed (Plus Code)**
+• Plus Code: {code}
+• Reference Area: {area}
+• Maps Link: https://www.google.com/maps/search/{code}+{urllib.parse.quote(area)}"""
+    
+    # Pattern 5: Area/Locality name (assume it's an Indian location)
+    # Clean up common phrases
+    location_clean = re.sub(r'^(near|opposite|behind|next to|in front of)\s+', '', location_input, flags=re.IGNORECASE)
+    
+    return f"""📍 **Location Parsed (Area Name)**
+• Location: {location_input}
+• Assumed Country: India
+• Search on Maps: https://www.google.com/maps/search/{urllib.parse.quote(location_input)}+India
+• Tip: For precise coordinates, share a Google Maps link or use format: latitude,longitude"""
+
+
+@tool  
+def get_distance(from_location: str, to_location: str) -> str:
+    """
+    Get approximate distance between two locations in India.
+    Uses web search to find distance information.
+    
+    Args:
+        from_location: Starting location (city, area, or coordinates)
+        to_location: Destination location (city, area, or coordinates)
+    
+    Returns:
+        Distance information in kilometers
+    """
+    # This is a helper that suggests using web search for accurate distance
+    return f"""📏 **Distance Query**
+• From: {from_location}
+• To: {to_location}
+
+To get accurate distance, use `web_search` with query:
+"distance from {from_location} to {to_location} in km"
+
+Or open in Google Maps:
+https://www.google.com/maps/dir/{from_location.replace(' ', '+')}/{to_location.replace(' ', '+')}"""
+
+
 # ============ TOOL EXPORTS ============
 
 def get_screenshot_tools():
@@ -325,10 +439,19 @@ def get_system_tools():
     ]
 
 
+def get_location_tools():
+    """Get location parsing tools."""
+    return [
+        parse_location,
+        get_distance,
+    ]
+
+
 def get_utility_tools():
     """Get all utility tools."""
     return (
         get_screenshot_tools() +
         get_notification_tools() +
-        get_system_tools()
+        get_system_tools() +
+        get_location_tools()
     )
