@@ -101,7 +101,8 @@ def shutdown_handler(signum, frame):
     logger.info("🛑 Shutdown signal received...")
     shutdown_event.set()
     logger.info("👋 Orion shutdown complete")
-    sys.exit(0)
+    # Don't call sys.exit() here - it causes threading cleanup issues
+    # The main loop will exit when shutdown_event is set
 
 
 def main():

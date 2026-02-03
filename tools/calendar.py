@@ -185,6 +185,10 @@ def list_calendar_events(days_ahead: int = 7, max_results: int = 10) -> str:
         max_results: Maximum number of events to return (default 10)
     """
     try:
+        # Convert to int in case LLM passes strings
+        days_ahead = int(days_ahead)
+        max_results = int(max_results)
+        
         service, error = _get_google_service()
         if error:
             return error

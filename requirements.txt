@@ -66,6 +66,11 @@ httpx>=0.24.0  # Async HTTP client for Telegram API
 fastapi>=0.109.0  # Webhook server for receiving messages
 uvicorn>=0.27.0  # ASGI server for FastAPI
 
+# YouTube Tools
+youtube-transcript-api>=0.6.0
+yt-dlp>=2024.1.0
+youtube-search-python>=1.6.6
+
 # Windows-only (optional)
 # pywin32>=306  # Windows service support
 
