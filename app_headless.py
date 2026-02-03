@@ -96,6 +96,21 @@ def run_scheduler():
         logger.error(f"❌ Scheduler error: {e}")
 
 
+def run_proactive_notifications():
+    """Run Proactive notifications (calendar digest, email alerts) in a separate thread."""
+    try:
+        logger.info("🔔 Starting Proactive Notifications...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        from integrations.proactive import proactive_notifications_loop
+        loop.run_until_complete(proactive_notifications_loop())
+        
+    except Exception as e:
+        logger.error(f"❌ Proactive notifications error: {e}")
+        logger.error(f"❌ Scheduler error: {e}")
+
+
 def shutdown_handler(signum, frame):
     """Handle graceful shutdown"""
     logger.info("🛑 Shutdown signal received...")
@@ -138,6 +153,13 @@ def main():
     scheduler_thread.start()
     services_started.append("⏰ Scheduler")
     logger.info("✅ Scheduler started")
+    
+    # Start Proactive Notifications (calendar digest, email alerts)
+    if telegram_configured:
+        proactive_thread = threading.Thread(target=run_proactive_notifications, daemon=True)
+        proactive_thread.start()
+        services_started.append("🔔 Notifications")
+        logger.info("✅ Proactive notifications started")
     
     if not services_started:
         logger.error("❌ No services could be started! Check your environment variables.")
