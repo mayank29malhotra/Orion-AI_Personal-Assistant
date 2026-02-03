@@ -88,6 +88,16 @@ def read_recent_emails(count: int = 5, unread_only: bool = False) -> str:
         unread_only: If True, only fetch unread emails
     """
     try:
+        # Convert parameters in case LLM passes wrong types
+        if isinstance(count, str):
+            count = int(count)
+        if isinstance(count, dict):
+            count = count.get('count', 5)
+        if isinstance(unread_only, str):
+            unread_only = unread_only.lower() in ('true', '1', 'yes')
+        if isinstance(unread_only, dict):
+            unread_only = unread_only.get('unread_only', False)
+        
         Config = _get_config()
         
         if not Config.EMAIL_ADDRESS or not Config.EMAIL_PASSWORD:
