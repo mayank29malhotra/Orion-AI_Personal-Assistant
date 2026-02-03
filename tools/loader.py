@@ -11,6 +11,8 @@ from tools.search import get_search_tools, get_repl_tools
 from tools.utils import get_utility_tools
 from tools.github import get_github_tools
 from tools.audio import get_audio_tools
+from tools.youtube import get_youtube_tools
+from tools.dictionary import get_dictionary_tools
 
 
 async def get_all_tools():
@@ -67,6 +69,12 @@ async def get_all_tools():
     # Audio/Voice tools
     tools.extend(get_audio_tools())
     
+    # YouTube tools (transcript, video info, search)
+    tools.extend(get_youtube_tools())
+    
+    # Dictionary tools (define, synonyms, antonyms, translate)
+    tools.extend(get_dictionary_tools())
+    
     # Python REPL
     tools.extend(get_repl_tools())
     
@@ -89,6 +97,10 @@ def get_all_tools_sync():
     tools.extend(get_note_tools())
     tools.extend(get_document_tools())
     tools.extend(get_search_tools())
+    tools.extend(get_github_tools())
+    tools.extend(get_audio_tools())
+    tools.extend(get_youtube_tools())
+    tools.extend(get_dictionary_tools())
     tools.extend(get_repl_tools())
     tools.extend(get_utility_tools())
     
@@ -118,6 +130,10 @@ def list_available_tools():
         'Markdown': ['markdown_to_html'],
         'QR Code': ['generate_qr_code'],
         'Search': ['web_search', 'fetch_webpage', 'wikipedia_search'],
+        'GitHub': ['github_list_repos', 'github_list_issues', 'github_create_issue', 'github_search_repos'],
+        'YouTube': ['get_youtube_transcript', 'get_youtube_video_info', 'search_youtube'],
+        'Dictionary': ['define_word', 'get_synonyms', 'get_antonyms', 'translate_word'],
+        'Audio': ['transcribe_audio'],
         'Python': ['python_repl'],
         'System': ['take_screenshot', 'send_push_notification', 'get_system_info', 
                    'list_directory', 'read_file', 'write_file'],
