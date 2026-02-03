@@ -9,6 +9,8 @@ from tools.tasks_notes import get_task_tools, get_note_tools
 from tools.documents import get_document_tools
 from tools.search import get_search_tools, get_repl_tools
 from tools.utils import get_utility_tools
+from tools.github import get_github_tools
+from tools.audio import get_audio_tools
 
 
 async def get_all_tools():
@@ -25,7 +27,9 @@ async def get_all_tools():
     - Tasks (create, list, complete, delete)
     - Notes (create, list, read, search, delete)
     - Documents (PDF, OCR, CSV, Excel, JSON, Markdown, QR code)
-    - Search (web search, Wikipedia, fetch webpage)
+    - Search (web search, browser search, Wikipedia, fetch webpage)
+    - GitHub (repos, issues, PRs)
+    - Audio (transcription via Whisper)
     - Python REPL
     - System utilities (screenshot, notifications, file operations)
     """
@@ -56,6 +60,12 @@ async def get_all_tools():
     
     # Search & Web tools
     tools.extend(get_search_tools())
+    
+    # GitHub tools
+    tools.extend(get_github_tools())
+    
+    # Audio/Voice tools
+    tools.extend(get_audio_tools())
     
     # Python REPL
     tools.extend(get_repl_tools())

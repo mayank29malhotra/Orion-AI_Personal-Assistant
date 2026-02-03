@@ -17,6 +17,7 @@ import logging
 from core.config import Config
 from core.agent import Orion
 from core.memory import memory, retry_queue, pending_queue, process_retry_queue
+from tools.audio import transcribe_audio_bytes
 
 logger = logging.getLogger("Orion")
 
@@ -177,6 +178,44 @@ async def send_typing_action(chat_id: str):
             )
     except Exception:
         pass
+
+
+async def transcribe_voice_message(file_id: str) -> str:
+    """
+    Download voice message from Telegram and transcribe using Whisper.
+    
+    Args:
+        file_id: Telegram file ID
+    
+    Returns:
+        Transcribed text or error message
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            # Get file path from Telegram
+            response = await client.get(f"{TG_API}/getFile", params={"file_id": file_id})
+            data = response.json()
+            
+            if not data.get("ok"):
+                return "[Voice message - failed to get file info]"
+            
+            file_path = data["result"]["file_path"]
+            
+            # Download the file
+            download_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+            response = await client.get(download_url)
+            audio_bytes = response.content
+            
+            # Get filename for extension
+            filename = os.path.basename(file_path)
+            
+            # Transcribe
+            text = await transcribe_audio_bytes(audio_bytes, filename)
+            return text
+            
+    except Exception as e:
+        logger.error(f"Voice transcription failed: {e}")
+        return f"[Voice message - transcription failed: {str(e)}]"
 
 
 def is_user_allowed(user_id: int) -> bool:
@@ -620,8 +659,21 @@ async def start_polling():
                         continue
                     
                     text = message_data.get("text", "")
+                    
+                    # Handle voice messages
+                    if "voice" in message_data or "audio" in message_data:
+                        voice_data = message_data.get("voice") or message_data.get("audio")
+                        file_id = voice_data.get("file_id")
+                        if file_id:
+                            await send_telegram_message(chat_id, "🎤 *Transcribing voice message...*")
+                            text = await transcribe_voice_message(file_id)
+                            if text.startswith("[Voice message"):
+                                await send_telegram_message(chat_id, f"❌ {text}")
+                                continue
+                            logger.info(f"Voice transcription: {text[:50]}...")
+                    
                     if not text:
-                        await send_telegram_message(chat_id, "Please send a text message.")
+                        await send_telegram_message(chat_id, "Please send a text or voice message.")
                         continue
                     
                     logger.info(f"Received message from {user_id}: {text[:50]}...")
