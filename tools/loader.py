@@ -133,6 +133,7 @@ def list_available_tools():
         'GitHub': ['github_list_repos', 'github_list_issues', 'github_create_issue', 'github_search_repos'],
         'YouTube': ['get_youtube_transcript', 'get_youtube_video_info', 'search_youtube'],
         'Dictionary': ['define_word', 'get_synonyms', 'get_antonyms', 'translate_word'],
+        'Location': ['parse_location', 'get_distance'],
         'Audio': ['transcribe_audio'],
         'Python': ['python_repl'],
         'System': ['take_screenshot', 'send_push_notification', 'get_system_info', 
