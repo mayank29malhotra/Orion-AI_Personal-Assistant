@@ -40,12 +40,15 @@ IMAP_SERVER = os.getenv("IMAP_SERVER", "imap.gmail.com")
 # Notification settings
 MORNING_DIGEST_HOUR = int(os.getenv("MORNING_DIGEST_HOUR", "7"))  # 7 AM IST
 EMAIL_CHECK_INTERVAL = int(os.getenv("EMAIL_NOTIFY_INTERVAL", "300"))  # 5 minutes
-CALENDAR_REMINDER_MINUTES = int(os.getenv("CALENDAR_REMINDER_MINUTES", "15"))  # 15 min before event
+
+# Multi-level reminder times (in minutes before event)
+REMINDER_TIMES = [30, 15, 5]  # 30 min, 15 min, 5 min before
 
 # Track last notification times
 last_email_check = datetime.min.replace(tzinfo=IST)
 last_digest_date = None
-notified_events = set()  # Track which events we've already sent reminders for
+# Track which events and reminder levels we've sent (event_id:minutes)
+notified_events = {}  # {event_id: [30, 15, 5] - list of reminder times already sent}
 
 
 async def send_telegram_message(message: str) -> bool:
@@ -134,8 +137,8 @@ def get_calendar_events_for_today() -> List[dict]:
         return []
 
 
-def get_upcoming_events(minutes_ahead: int = 15) -> List[dict]:
-    """Get events starting in the next X minutes"""
+def get_upcoming_events(minutes_ahead: int = 35) -> List[dict]:
+    """Get events starting in the next X minutes (default 35 to catch 30-min reminders)"""
     try:
         service, error = _get_proactive_calendar_service()
         if error:
@@ -312,49 +315,79 @@ async def check_new_emails():
 
 
 async def check_upcoming_events():
-    """Send reminders for events starting soon"""
+    """Send multi-level reminders for events (30 min, 15 min, 5 min before)"""
     global notified_events
     
-    events = get_upcoming_events(CALENDAR_REMINDER_MINUTES)
+    # Get events in the next 35 minutes (to catch 30-min reminders)
+    events = get_upcoming_events(35)
     
     for event in events:
         event_id = event.get('id')
-        if event_id in notified_events:
-            continue
-        
         title = event.get('summary', 'Untitled Event')
         start = event['start'].get('dateTime', event['start'].get('date'))
         
+        # Skip all-day events
+        if 'T' not in start:
+            continue
+        
         # Parse start time
-        if 'T' in start:
-            try:
-                start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                start_dt = start_dt.astimezone(IST)
-                time_str = start_dt.strftime('%I:%M %p')
+        try:
+            start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+            start_dt = start_dt.astimezone(IST)
+            time_str = start_dt.strftime('%I:%M %p')
+            
+            # Calculate minutes until event
+            now = datetime.now(IST)
+            minutes_until = int((start_dt - now).total_seconds() / 60)
+        except:
+            continue
+        
+        # Initialize tracking for this event
+        if event_id not in notified_events:
+            notified_events[event_id] = []
+        
+        # Check each reminder threshold
+        for reminder_mins in REMINDER_TIMES:
+            # Skip if already sent this reminder level
+            if reminder_mins in notified_events[event_id]:
+                continue
+            
+            # Send reminder if event is within this threshold but not past it
+            # e.g., for 30-min reminder: send if 25 < minutes_until <= 30
+            lower_bound = reminder_mins - 5 if reminder_mins > 5 else 0
+            if lower_bound < minutes_until <= reminder_mins:
+                location = event.get('location', '')
+                location_str = f"\n📍 {location}" if location else ""
                 
-                # Calculate minutes until event
-                now = datetime.now(IST)
-                minutes_until = int((start_dt - now).total_seconds() / 60)
-            except:
-                time_str = start
-                minutes_until = CALENDAR_REMINDER_MINUTES
-        else:
-            continue  # Skip all-day events for reminders
-        
-        location = event.get('location', '')
-        location_str = f"\n📍 {location}" if location else ""
-        
-        message = f"⏰ <b>Upcoming Event!</b>\n\n"
-        message += f"📌 <b>{title}</b>\n"
-        message += f"🕐 Starting in {minutes_until} minutes ({time_str}){location_str}"
-        
-        await send_telegram_message(message)
-        notified_events.add(event_id)
-        logger.info(f"Event reminder sent: {title}")
+                # Different urgency levels for different reminder times
+                if reminder_mins == 30:
+                    urgency = "📅"
+                    urgency_text = "Coming up"
+                elif reminder_mins == 15:
+                    urgency = "⏰"
+                    urgency_text = "Starting soon"
+                else:  # 5 mins
+                    urgency = "🚨"
+                    urgency_text = "STARTING NOW"
+                
+                message = f"{urgency} <b>{urgency_text}!</b>\n\n"
+                message += f"📌 <b>{title}</b>\n"
+                message += f"🕐 In {minutes_until} minutes ({time_str}){location_str}"
+                
+                if reminder_mins == 5:
+                    message += "\n\n⚡ <i>Time to prepare!</i>"
+                
+                await send_telegram_message(message)
+                notified_events[event_id].append(reminder_mins)
+                logger.info(f"Event reminder ({reminder_mins}min) sent: {title}")
+                break  # Only send one reminder per check cycle
     
-    # Clean up old event IDs (keep last 100)
-    if len(notified_events) > 100:
-        notified_events = set(list(notified_events)[-50:])
+    # Clean up old events (keep last 50 event IDs)
+    if len(notified_events) > 50:
+        # Remove oldest entries
+        keys_to_remove = list(notified_events.keys())[:-25]
+        for key in keys_to_remove:
+            del notified_events[key]
 
 
 async def proactive_notifications_loop():
