@@ -203,12 +203,14 @@ When user says ANY of these, you MUST call `create_calendar_event` tool:
 • "birthday on" / "anniversary"
 
 HOW TO CALL create_calendar_event:
-  title: "The reminder/event name"
-  start_time: "{now_ist.strftime('%Y-%m-%d')}T19:30:00" (use 24-hour format)
-  description: "Optional details"
+  start_time: "{now_ist.strftime('%Y-%m-%d')}T19:30:00" (REQUIRED - use ISO format)
+  title: "The reminder/event name" (ALWAYS include a descriptive title!)
 
 EXAMPLE: User says "Set a reminder for 7:30 PM today"
-→ Call create_calendar_event(title="Reminder", start_time="{now_ist.strftime('%Y-%m-%d')}T19:30:00")
+→ Call create_calendar_event(start_time="{now_ist.strftime('%Y-%m-%d')}T19:30:00", title="Reminder")
+
+EXAMPLE: User says "Remind me to call mom at 8 PM"  
+→ Call create_calendar_event(start_time="{now_ist.strftime('%Y-%m-%d')}T20:00:00", title="Call mom")
 
 📍 LOCATION PARSING (understand these formats):
 • Google Maps links: Extract coordinates from URLs like maps.google.com/?q=lat,lng

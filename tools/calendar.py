@@ -105,18 +105,18 @@ def generate_token():
 
 @tool
 def create_calendar_event(
-    title: str,
     start_time: str,
+    title: str = "Reminder",
     end_time: Optional[str] = None,
     description: str = "",
     location: str = ""
 ) -> str:
     """
-    Create a Google Calendar event.
+    Create a Google Calendar event. Use this for reminders, events, birthdays, tasks.
     
     Args:
-        title: Event title
-        start_time: Start time in ISO format (YYYY-MM-DDTHH:MM:SS) or natural language
+        start_time: Start time in ISO format (YYYY-MM-DDTHH:MM:SS). REQUIRED.
+        title: Event title (default: "Reminder"). Always provide a meaningful title.
         end_time: End time (optional, defaults to 1 hour after start)
         description: Event description
         location: Event location
