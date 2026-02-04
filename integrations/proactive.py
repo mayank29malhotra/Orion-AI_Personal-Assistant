@@ -73,12 +73,44 @@ async def send_telegram_message(message: str) -> bool:
         return False
 
 
+def _get_proactive_calendar_service():
+    """
+    Get a standalone Google Calendar service for proactive notifications.
+    Separate from LangChain tools to avoid deadlock issues.
+    """
+    try:
+        import json
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+        
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        creds = None
+        
+        token_path = 'google_cred/token.json'
+        token_json_env = os.getenv("GOOGLE_CALENDAR_TOKEN_JSON")
+        
+        if token_json_env:
+            token_data = json.loads(token_json_env)
+            creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+        elif os.path.exists(token_path):
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                return None, "Calendar not configured"
+        
+        return build('calendar', 'v3', credentials=creds), None
+    except Exception as e:
+        return None, str(e)
+
+
 def get_calendar_events_for_today() -> List[dict]:
     """Get today's calendar events"""
     try:
-        from tools.calendar import _get_google_service
-        
-        service, error = _get_google_service()
+        service, error = _get_proactive_calendar_service()
         if error:
             logger.error(f"Calendar error: {error}")
             return []
@@ -105,9 +137,7 @@ def get_calendar_events_for_today() -> List[dict]:
 def get_upcoming_events(minutes_ahead: int = 15) -> List[dict]:
     """Get events starting in the next X minutes"""
     try:
-        from tools.calendar import _get_google_service
-        
-        service, error = _get_google_service()
+        service, error = _get_proactive_calendar_service()
         if error:
             return []
         
