@@ -13,6 +13,22 @@ from tools.github import get_github_tools
 from tools.audio import get_audio_tools
 from tools.youtube import get_youtube_tools
 from tools.dictionary import get_dictionary_tools
+from tools.indian_railways import (
+    check_pnr_status, get_train_status, search_trains, get_station_code
+)
+from tools.flights import (
+    get_flight_status, get_flight_by_route, get_airport_info, track_flight_live
+)
+
+
+def get_railway_tools():
+    """Get Indian Railways tools"""
+    return [check_pnr_status, get_train_status, search_trains, get_station_code]
+
+
+def get_flight_tools():
+    """Get Flight tracking tools"""
+    return [get_flight_status, get_flight_by_route, get_airport_info, track_flight_live]
 
 
 async def get_all_tools():
@@ -75,6 +91,12 @@ async def get_all_tools():
     # Dictionary tools (define, synonyms, antonyms, translate)
     tools.extend(get_dictionary_tools())
     
+    # Indian Railways tools (PNR status, train running status, search)
+    tools.extend(get_railway_tools())
+    
+    # Flight tools (flight status, live tracking)
+    tools.extend(get_flight_tools())
+    
     # Python REPL
     tools.extend(get_repl_tools())
     
@@ -101,6 +123,8 @@ def get_all_tools_sync():
     tools.extend(get_audio_tools())
     tools.extend(get_youtube_tools())
     tools.extend(get_dictionary_tools())
+    tools.extend(get_railway_tools())
+    tools.extend(get_flight_tools())
     tools.extend(get_repl_tools())
     tools.extend(get_utility_tools())
     
@@ -133,6 +157,8 @@ def list_available_tools():
         'GitHub': ['github_list_repos', 'github_list_issues', 'github_create_issue', 'github_search_repos'],
         'YouTube': ['get_youtube_transcript', 'get_youtube_video_info', 'search_youtube'],
         'Dictionary': ['define_word', 'get_synonyms', 'get_antonyms', 'translate_word'],
+        'Indian Railways': ['check_pnr_status', 'get_train_status', 'search_trains', 'get_station_code'],
+        'Flights': ['get_flight_status', 'get_flight_by_route', 'get_airport_info', 'track_flight_live'],
         'Location': ['parse_location', 'get_distance'],
         'Audio': ['transcribe_audio'],
         'Python': ['python_repl'],
