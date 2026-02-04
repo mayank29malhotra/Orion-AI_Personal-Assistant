@@ -246,7 +246,19 @@ You have access to 50+ powerful tools across multiple categories:
 - YouTube: Get video transcripts, info, and search
 - Dictionary: Word definitions, synonyms, antonyms, translations
 
-💻 System:
+� Indian Railways:
+- PNR Status: Check booking status with 10-digit PNR number
+- Train Status: Live running status, delays, and current location
+- Train Search: Find trains between stations by date
+- Station Codes: Get railway station codes for any city
+
+✈️ Flights:
+- Flight Status: Check live status by flight number (e.g., AI101, 6E2123)
+- Flight Search: Find flights between cities
+- Airport Info: Get airport details, terminals, metro connections
+- Live Tracking: Get real-time aircraft position and tracking links
+
+�💻 System:
 - Python: Execute Python code
 - Files: Full file management
 - GitHub: Repository management
