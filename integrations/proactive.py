@@ -160,17 +160,18 @@ def get_upcoming_events(minutes_ahead: int = 15) -> List[dict]:
 
 
 async def send_morning_digest():
-    """Send morning calendar digest"""
+    """Send morning calendar digest at 7 AM IST"""
     global last_digest_date
     
     now = datetime.now(IST)
     today = now.date()
     
-    # Only send once per day, at the configured hour
+    # Only send once per day
     if last_digest_date == today:
         return
     
-    if now.hour < MORNING_DIGEST_HOUR:
+    # Only send between 7:00 AM and 7:10 AM IST
+    if now.hour != MORNING_DIGEST_HOUR or now.minute > 10:
         return
     
     events = get_calendar_events_for_today()
@@ -362,13 +363,14 @@ async def proactive_notifications_loop():
     
     while True:
         try:
-            # Send morning digest (once per day)
+            # Send morning digest at 7 AM (once per day)
             await send_morning_digest()
             
-            # Check for new emails
-            await check_new_emails()
+            # NOTE: Email notifications disabled - email_bot.py handles ORION: commands
+            # Regular emails don't need notification, only ORION: commands get processed
+            # await check_new_emails()
             
-            # Check for upcoming events
+            # Check for upcoming events (15 min reminder)
             await check_upcoming_events()
             
         except Exception as e:
