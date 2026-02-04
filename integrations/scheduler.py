@@ -34,8 +34,9 @@ from core.utils import Logger
 
 logger = Logger().logger
 
-# Database path
-SCHEDULER_DB = "scheduled_tasks.db"
+# Database path - use sandbox directory for persistence
+DATA_DIR = os.getenv("ORION_DATA_DIR", os.getcwd())
+SCHEDULER_DB = os.path.join(DATA_DIR, "sandbox", "data", "scheduled_tasks.db")
 
 # HuggingFace Space URL (for self-ping)
 HF_SPACE_URL = os.getenv("HF_SPACE_URL", "")  # e.g., https://username-orion.hf.space
