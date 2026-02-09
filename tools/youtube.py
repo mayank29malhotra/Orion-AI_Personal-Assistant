@@ -178,6 +178,52 @@ def search_youtube(query: str, max_results: int = 5) -> str:
     Returns:
         List of video titles with URLs
     """
+    # Try method 1: yt-dlp search (most reliable)
+    try:
+        import yt_dlp
+        
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'skip_download': True,
+            'default_search': 'ytsearch',
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            results = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
+        
+        if not results or 'entries' not in results:
+            return f"🔍 No YouTube results found for: {query}"
+        
+        output = [f"🔍 YouTube search results for: **{query}**\n"]
+        
+        for i, video in enumerate(results['entries'][:max_results], 1):
+            if not video:
+                continue
+            title = video.get('title', 'Unknown')
+            channel = video.get('channel', video.get('uploader', 'Unknown'))
+            duration = video.get('duration', 0)
+            url = video.get('url', video.get('webpage_url', ''))
+            
+            # Format duration
+            if duration:
+                mins, secs = divmod(int(duration), 60)
+                duration_str = f"{mins}:{secs:02d}"
+            else:
+                duration_str = "N/A"
+            
+            output.append(f"{i}. **{title}**")
+            output.append(f"   📺 {channel} | ⏱️ {duration_str}")
+            output.append(f"   🔗 https://www.youtube.com/watch?v={video.get('id', '')}\n")
+        
+        logger.info(f"YouTube search (yt-dlp): {query}")
+        return "\n".join(output)
+        
+    except Exception as e:
+        logger.warning(f"yt-dlp YouTube search failed: {e}, trying fallback...")
+    
+    # Try method 2: youtubesearchpython (fallback)
     try:
         from youtubesearchpython import VideosSearch
         
@@ -185,7 +231,7 @@ def search_youtube(query: str, max_results: int = 5) -> str:
         results = search.result()
         
         if not results.get('result'):
-            return f"No results found for: {query}"
+            return f"🔍 No results found for: {query}"
         
         output = [f"🔍 YouTube search results for: **{query}**\n"]
         
@@ -200,13 +246,12 @@ def search_youtube(query: str, max_results: int = 5) -> str:
             output.append(f"   📺 {channel} | ⏱️ {duration} | 👁️ {views}")
             output.append(f"   🔗 {url}\n")
         
+        logger.info(f"YouTube search (youtubesearchpython): {query}")
         return "\n".join(output)
         
-    except ImportError:
-        return "❌ youtube-search-python not installed. Run: pip install youtube-search-python"
     except Exception as e:
         logger.error(f"YouTube search error: {e}")
-        return f"❌ Search failed: {str(e)}"
+        return f"❌ YouTube search unavailable. Try using web_search tool with 'YouTube {query}' instead."
 
 
 def get_youtube_tools():
