@@ -19,9 +19,21 @@ async def get_browser_tools():
         import os
         
         playwright = await async_playwright().start()
-        # Use headless=True for server environments (no display)
-        headless = os.getenv('HEADLESS_BROWSER', 'true').lower() == 'true'
-        browser = await playwright.chromium.launch(headless=headless)
+        
+        # Container/server-safe browser launch args
+        browser_args = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--single-process',
+        ]
+        
+        browser = await playwright.chromium.launch(
+            headless=True,
+            args=browser_args
+        )
         toolkit = PlayWrightBrowserToolkit.from_browser(async_browser=browser)
         logger.info("Playwright browser tools initialized successfully")
         return toolkit.get_tools(), browser, playwright

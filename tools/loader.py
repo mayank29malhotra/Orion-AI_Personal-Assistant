@@ -56,20 +56,12 @@ async def get_all_tools():
     playwright = None
     
     # Browser tools (async - Playwright)
-    # Skip browser tools in container/headless mode to avoid Playwright issues
-    import os
-    skip_browser = os.getenv('SKIP_BROWSER_TOOLS', 'false').lower() == 'true'
-    
-    if not skip_browser:
-        try:
-            browser_tools, browser, playwright = await get_browser_tools()
-            tools.extend(browser_tools)
-        except Exception as e:
-            import logging
-            logging.getLogger("Orion").warning(f"Browser tools failed to load: {e}")
-    else:
+    try:
+        browser_tools, browser, playwright = await get_browser_tools()
+        tools.extend(browser_tools)
+    except Exception as e:
         import logging
-        logging.getLogger("Orion").info("Browser tools skipped (SKIP_BROWSER_TOOLS=true)")
+        logging.getLogger("Orion").warning(f"Browser tools failed to load: {e}")
     
     # Email tools
     tools.extend(get_email_tools())
