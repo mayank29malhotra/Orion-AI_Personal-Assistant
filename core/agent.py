@@ -169,7 +169,15 @@ class Orion:
 4. For tasks/notes → ALWAYS call the appropriate tool
 5. DO NOT say "I cannot directly..." - you CAN by using tools!
 6. DO NOT give step-by-step instructions for users to do manually.
-7. NEVER output markdown text directly when a tool call is expected - complete the tool call first!
+
+⚠️⚠️⚠️ RULE #7 - ABSOLUTELY CRITICAL FOR TOOL RESPONSES:
+After receiving tool results, you MUST respond with PLAIN TEXT ONLY - NO markdown formatting!
+• DO NOT use **bold**, *italics*, headers (##), or numbered lists (1., 2., 3.)
+• DO NOT start with "Here are...", "Here is...", "I found..."
+• JUST state the information directly in plain conversational text
+• Example WRONG: "Here are some YouTube videos:\n\n1. **Video Title**..."
+• Example RIGHT: "I found several Python tutorials. The top one is Video Title by Creator, about 30 minutes long."
+Failing to follow this rule causes API errors!
 
 🌐 WEB SEARCH FALLBACK - USE FOR ANY INFO NOT COVERED BY SPECIFIC TOOLS:
 When you need information but don't have a dedicated tool, USE `web_search` tool:
@@ -184,6 +192,7 @@ When you need information but don't have a dedicated tool, USE `web_search` tool
 • For definitions, biographies, history → call `wikipedia_search` tool
 • For summaries of topics, places, people → call `wikipedia_search` tool
 • DO NOT say "I don't have Wikipedia access" - you DO have `wikipedia_search` tool!
+• IMPORTANT: The `sentences` parameter MUST be an INTEGER (e.g., 5), NOT a string (NOT "5")
 
 💻 GITHUB - USE GITHUB TOOLS FOR:
 • `github_search_repos` → Search for repositories (e.g., "AI projects", "langchain")

@@ -226,9 +226,20 @@ def search_youtube(query: str, max_results: int = 5) -> str:
     # Try method 2: youtubesearchpython (fallback)
     try:
         from youtubesearchpython import VideosSearch
+        import httpx
         
-        search = VideosSearch(query, limit=max_results)
-        results = search.result()
+        # Disable proxies for youtubesearchpython to avoid API issues
+        original_post = httpx.Client.post
+        def patched_post(self, *args, **kwargs):
+            kwargs.pop('proxies', None)  # Remove proxies argument if present
+            return original_post(self, *args, **kwargs)
+        httpx.Client.post = patched_post
+        
+        try:
+            search = VideosSearch(query, limit=max_results)
+            results = search.result()
+        finally:
+            httpx.Client.post = original_post  # Restore original method
         
         if not results.get('result'):
             return f"🔍 No results found for: {query}"
