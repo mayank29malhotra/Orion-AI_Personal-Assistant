@@ -46,8 +46,8 @@ async def get_browser_tools():
         return toolkit.get_tools(), browser, playwright
     
     try:
-        # Timeout after 8 seconds to prevent blocking
-        tools, browser, playwright = await asyncio.wait_for(init_browser(), timeout=8.0)
+        # Timeout after 30 seconds - Chromium needs more time when using swap
+        tools, browser, playwright = await asyncio.wait_for(init_browser(), timeout=30.0)
         logger.info("Playwright browser tools initialized successfully")
         return tools, browser, playwright
     except asyncio.TimeoutError:
