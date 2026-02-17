@@ -28,5 +28,25 @@
     "completed": false,
     "created_at": "2026-02-09T16:42:35.641325",
     "completed_at": null
+  },
+  {
+    "id": 4,
+    "title": "Buy groceries",
+    "description": "",
+    "due_date": "2026-02-12",
+    "priority": "high",
+    "completed": false,
+    "created_at": "2026-02-10T18:31:13.865652",
+    "completed_at": null
+  },
+  {
+    "id": 5,
+    "title": "Meeting prep",
+    "description": "Prepare slides for Monday meeting",
+    "due_date": "",
+    "priority": "high",
+    "completed": false,
+    "created_at": "2026-02-10T18:38:14.804419",
+    "completed_at": null
   }
 ]
