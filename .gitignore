@@ -51,3 +51,9 @@ sandbox/notes/
 sandbox/tasks/
 sandbox/screenshots/
 sandbox/temp/
+/sandbox
+sandbox/data/tasks.json
+sandbox\data\tasks.json
+
+
+audit.md
