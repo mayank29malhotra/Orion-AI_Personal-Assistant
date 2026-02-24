@@ -455,7 +455,11 @@ async def lifespan(app: FastAPI):
     global orion_instance
     if orion_instance:
         try:
-            orion_instance.cleanup()
+            # Phase 4: graceful shutdown — wait for in-flight requests before cleanup
+            if hasattr(orion_instance, 'graceful_shutdown'):
+                await orion_instance.graceful_shutdown(timeout=30)
+            else:
+                orion_instance.cleanup()
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
     logger.info("Telegram bot shutdown complete")
@@ -511,18 +515,88 @@ async def telegram_webhook(req: Request):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "online",
+    """Health check endpoint for load balancers and monitoring.
+    
+    Returns 200 if healthy, 503 if degraded (Orion not ready or circuit breaker open).
+    Includes subsystem status for observability.
+    """
+    from fastapi.responses import JSONResponse
+
+    health = {
+        "status": "healthy",
         "service": "Orion Telegram Integration",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "checks": {
+            "orion_ready": orion_instance is not None,
+            "memory_db": False,
+            "retry_queue": False,
+            "llm_circuit_breaker": None,
+        }
     }
+
+    # Check memory subsystems
+    try:
+        health["checks"]["memory_db"] = memory is not None
+        health["checks"]["retry_queue"] = retry_queue is not None
+    except Exception:
+        pass
+
+    # Check circuit breaker state (added in Phase 2)
+    if orion_instance and hasattr(orion_instance, "llm_circuit_breaker"):
+        cb_state = orion_instance.llm_circuit_breaker.get_state()
+        health["checks"]["llm_circuit_breaker"] = cb_state
+        if cb_state["state"] == "open":
+            health["status"] = "degraded"
+
+    # If Orion isn't initialized, report degraded
+    if not orion_instance:
+        health["status"] = "degraded"
+        return JSONResponse(health, status_code=503)
+
+    if health["status"] == "degraded":
+        return JSONResponse(health, status_code=503)
+
+    return health
 
 
 @app.get("/")
 async def root():
     """Root endpoint."""
     return {"message": "Orion Telegram Bot is running!", "docs": "/docs"}
+
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    """System metrics for monitoring dashboards.
+    
+    Exposes request counts, latency percentiles, circuit breaker state,
+    queue depths, and memory stats. Designed for Prometheus-compatible
+    scrapers, Uptime Robot, or simple curl-based monitoring.
+    """
+    metrics = {
+        "timestamp": datetime.now().isoformat(),
+        "orion": None,
+        "memory": {},
+        "retry_queue": {},
+        "pending_queue": {},
+    }
+    
+    # Orion-level metrics (request counts, latency, circuit breaker)
+    if orion_instance and hasattr(orion_instance, "get_metrics"):
+        metrics["orion"] = orion_instance.get_metrics()
+    
+    # Subsystem stats (already exist in core/memory.py, just never exposed)
+    try:
+        if memory:
+            metrics["memory"] = memory.get_stats()
+        if retry_queue:
+            metrics["retry_queue"] = retry_queue.get_stats()
+        if pending_queue:
+            metrics["pending_queue"] = pending_queue.get_stats()
+    except Exception:
+        pass  # Don't let metrics collection break the endpoint
+    
+    return metrics
 
 
 async def set_webhook(webhook_url: str):

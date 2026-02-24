@@ -4,6 +4,8 @@ Includes logging, caching, rate limiting, and error handling.
 """
 import logging
 import time
+import json
+import threading
 import functools
 from typing import Any, Callable, Dict, Optional
 from datetime import datetime, timedelta
@@ -13,8 +15,15 @@ import traceback
 
 class Logger:
     """
-    Enhanced logging system with console and file output.
+    Structured logging system with dual output:
+    - Console + orion.log: human-readable format (same as before)
+    - orion_structured.log: JSON-structured logs with correlation IDs, latency, etc.
+    
     Singleton pattern for consistent logging across modules.
+    
+    Usage:
+        logger.info("message")                           # Plain log (backward compatible)
+        logger.info("event", request_id="abc", ms=120)   # Structured log with context
     """
     
     _instance = None
@@ -37,7 +46,7 @@ class Logger:
         if self.logger.handlers:
             return
         
-        # Console handler
+        # Console handler (human-readable)
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         console_format = logging.Formatter(
@@ -45,7 +54,7 @@ class Logger:
         )
         console_handler.setFormatter(console_format)
         
-        # File handler
+        # File handler (human-readable, detailed)
         file_handler = logging.FileHandler('orion.log')
         file_handler.setLevel(logging.DEBUG)
         file_format = logging.Formatter(
@@ -55,24 +64,61 @@ class Logger:
         
         self.logger.addHandler(console_handler)
         self.logger.addHandler(file_handler)
+        
+        # Structured JSON logger (separate logger to avoid duplicate console output)
+        self._structured_logger = logging.getLogger("Orion.structured")
+        self._structured_logger.setLevel(logging.DEBUG)
+        self._structured_logger.propagate = False  # Don't bubble up to parent "Orion" logger
+        
+        try:
+            json_handler = logging.FileHandler('orion_structured.log', encoding='utf-8')
+            json_handler.setLevel(logging.DEBUG)
+            json_handler.setFormatter(logging.Formatter('%(message)s'))
+            self._structured_logger.addHandler(json_handler)
+            self._json_enabled = True
+        except Exception:
+            self._json_enabled = False
     
-    def info(self, message: str):
+    def _emit_json(self, level: str, message: str, context: dict):
+        """Emit a JSON-structured log entry to orion_structured.log."""
+        if not self._json_enabled:
+            return
+        try:
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "level": level,
+                "message": message,
+                **context,
+            }
+            self._structured_logger.info(json.dumps(entry, default=str))
+        except Exception:
+            pass  # Never let structured logging break the application
+    
+    def info(self, message: str, **context):
         self.logger.info(message)
+        if context:
+            self._emit_json("INFO", message, context)
     
-    def error(self, message: str, exc_info=None):
+    def error(self, message: str, exc_info=None, **context):
         if exc_info:
             self.logger.error(message, exc_info=True)
         else:
             self.logger.error(message)
+        self._emit_json("ERROR", message, context)
     
-    def warning(self, message: str):
+    def warning(self, message: str, **context):
         self.logger.warning(message)
+        if context:
+            self._emit_json("WARNING", message, context)
     
-    def debug(self, message: str):
+    def debug(self, message: str, **context):
         self.logger.debug(message)
+        if context:
+            self._emit_json("DEBUG", message, context)
     
-    def critical(self, message: str):
+    def critical(self, message: str, **context):
         self.logger.critical(message)
+        self._emit_json("CRITICAL", message, context)
 
 
 # Global logger instance
@@ -153,6 +199,100 @@ class RateLimiter:
             if now - call_time < self.period
         ]
         return max(0, self.max_calls - len(self.calls[key]))
+
+
+class CircuitBreaker:
+    """Circuit breaker for external service calls.
+    
+    Prevents cascading failures by failing fast when an upstream service
+    (e.g., Groq LLM) is consistently failing.
+    
+    States:
+        CLOSED  — Normal operation. Calls pass through.
+        OPEN    — Service is down. Calls are rejected immediately (fail fast).
+        HALF_OPEN — Recovery probe. One test call is allowed through.
+    
+    Transitions:
+        CLOSED → OPEN:       After `failure_threshold` consecutive failures.
+        OPEN → HALF_OPEN:    After `recovery_timeout` seconds elapse.
+        HALF_OPEN → CLOSED:  If the test call succeeds.
+        HALF_OPEN → OPEN:    If the test call fails.
+    """
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60, name: str = "default"):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.name = name
+        self.state = self.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time: float = 0
+        self.last_state_change: float = time.time()
+        self._lock = threading.Lock()
+
+    def can_execute(self) -> bool:
+        """Check if the circuit allows a call through."""
+        with self._lock:
+            if self.state == self.CLOSED:
+                return True
+            elif self.state == self.OPEN:
+                # Check if recovery timeout has elapsed → transition to HALF_OPEN
+                if time.time() - self.last_failure_time >= self.recovery_timeout:
+                    self.state = self.HALF_OPEN
+                    self.last_state_change = time.time()
+                    logger.info(f"Circuit breaker '{self.name}' -> HALF_OPEN (testing recovery)")
+                    return True  # Allow one probe call
+                return False
+            elif self.state == self.HALF_OPEN:
+                # Only one probe call at a time; block others while probe is in flight
+                return False
+        return False
+
+    def record_success(self):
+        """Record a successful call. Resets failure count and closes the circuit."""
+        with self._lock:
+            old_state = self.state
+            self.failure_count = 0
+            self.success_count += 1
+            self.state = self.CLOSED
+            self.last_state_change = time.time()
+            if old_state != self.CLOSED:
+                logger.info(f"Circuit breaker '{self.name}' -> CLOSED (recovered after success)")
+
+    def record_failure(self):
+        """Record a failed call. May trip the circuit to OPEN."""
+        with self._lock:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+
+            if self.state == self.HALF_OPEN:
+                # Probe call failed → back to OPEN
+                self.state = self.OPEN
+                self.last_state_change = time.time()
+                logger.warning(f"Circuit breaker '{self.name}' -> OPEN (probe failed, {self.failure_count} failures)")
+            elif self.failure_count >= self.failure_threshold:
+                self.state = self.OPEN
+                self.last_state_change = time.time()
+                logger.warning(
+                    f"Circuit breaker '{self.name}' -> OPEN after {self.failure_count} consecutive failures. "
+                    f"Will retry in {self.recovery_timeout}s."
+                )
+
+    def get_state(self) -> dict:
+        """Return a serializable snapshot of the circuit breaker state."""
+        with self._lock:
+            return {
+                "name": self.name,
+                "state": self.state,
+                "failure_count": self.failure_count,
+                "success_count": self.success_count,
+                "failure_threshold": self.failure_threshold,
+                "recovery_timeout_s": self.recovery_timeout,
+                "seconds_since_last_failure": round(time.time() - self.last_failure_time, 1) if self.last_failure_time else None,
+            }
 
 
 # Global cache and rate limiter

@@ -60,7 +60,11 @@ Category Mapping:
 
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
+from pydantic import BaseModel, Field
 import re
+import logging
+
+logger = logging.getLogger("orion.router")
 
 
 class AgentCategory(Enum):
@@ -205,12 +209,99 @@ TOOL_CATEGORIES = {
     "list_directory": AgentCategory.SYSTEM,
     "read_file": AgentCategory.SYSTEM,
     "write_file": AgentCategory.SYSTEM,
+    
+    # Browser (Playwright tools — loaded dynamically, may not always be available)
+    "navigate_browser": AgentCategory.BROWSER,
+    "click_element": AgentCategory.BROWSER,
+    "get_elements": AgentCategory.BROWSER,
+    "current_webpage": AgentCategory.BROWSER,
+    "extract_text": AgentCategory.BROWSER,
+    "extract_hyperlinks": AgentCategory.BROWSER,
+    "fill_text": AgentCategory.BROWSER,
+    
+    # Additional tools (previously uncategorized)
+    "browser_search": AgentCategory.RESEARCH,       # Search fallback, fits with web_search
+    "github_get_repo_info": AgentCategory.DEVELOPER,
+    "github_list_pull_requests": AgentCategory.DEVELOPER,
+    "parse_location": AgentCategory.TRAVEL,
+    "get_distance": AgentCategory.TRAVEL,
 }
 
 
-def classify_intent(query: str) -> Tuple[AgentCategory, float]:
+class RouterClassification(BaseModel):
+    """Structured output from the router LLM."""
+    category: str = Field(description="One of: TRAVEL, COMMUNICATION, PRODUCTIVITY, DEVELOPER, MEDIA, RESEARCH, SYSTEM, BROWSER, GENERAL")
+    confidence: float = Field(description="Confidence score between 0.0 and 1.0")
+    reasoning: str = Field(description="One-sentence explanation for the classification")
+
+
+# Valid category names for validation
+_VALID_CATEGORIES = {cat.value.upper(): cat for cat in AgentCategory}
+
+
+ROUTER_SYSTEM_PROMPT = """You are an intent classifier for a personal AI assistant called Orion.
+Given a user query, classify it into exactly ONE category.
+
+Categories:
+- TRAVEL: flights, trains, travel booking, PNR status, airport/station info, trip planning, fare comparison
+- COMMUNICATION: sending/reading emails, mail, notifications
+- PRODUCTIVITY: calendar events, reminders, tasks, to-do lists, notes
+- DEVELOPER: GitHub repos/issues/PRs, coding, Python execution, debugging
+- MEDIA: YouTube videos/transcripts, audio transcription, PDF, documents, CSV/Excel/JSON, QR codes, OCR
+- RESEARCH: web search, Wikipedia, dictionary definitions, synonyms/antonyms, translations
+- SYSTEM: screenshots, file/folder management, system info
+- BROWSER: web browsing, navigating websites, clicking elements
+- GENERAL: greetings, chitchat, unclear intent, or doesn't fit any above category
+
+Rules:
+- If the query clearly fits one category, assign HIGH confidence (0.7-1.0)
+- If the query could fit multiple categories, pick the most specific one with MEDIUM confidence (0.4-0.7)
+- If the query is a greeting, thanks, or small talk, classify as GENERAL with confidence 0.0
+- If unsure, classify as GENERAL with low confidence"""
+
+
+def classify_intent_llm(query: str, router_llm) -> Tuple[AgentCategory, float]:
     """
-    Classify user query to determine which agent should handle it.
+    LLM-based intent classification using a lightweight model.
+    
+    Uses structured output to get reliable category + confidence from the LLM.
+    This replaces keyword counting with actual language understanding.
+    
+    Args:
+        query: User's message
+        router_llm: ChatOpenAI instance with structured output bound
+        
+    Returns:
+        Tuple of (AgentCategory, confidence_score)
+    """
+    try:
+        from langchain_core.messages import SystemMessage, HumanMessage
+        
+        messages = [
+            SystemMessage(content=ROUTER_SYSTEM_PROMPT),
+            HumanMessage(content=f'Classify this user query:\n"{query}"'),
+        ]
+        result = router_llm.invoke(messages)
+        
+        # Map the returned category string to AgentCategory enum
+        cat_str = result.category.strip().upper()
+        category = _VALID_CATEGORIES.get(cat_str, AgentCategory.GENERAL)
+        confidence = max(0.0, min(1.0, result.confidence))  # Clamp to [0, 1]
+        
+        logger.info(f"LLM Router: '{query[:50]}' → {category.value} (conf: {confidence:.2f}, reason: {result.reasoning})")
+        return category, confidence
+        
+    except Exception as e:
+        logger.warning(f"LLM router failed: {e} — falling back to keyword classification")
+        return classify_intent_keywords(query)
+
+
+def classify_intent_keywords(query: str) -> Tuple[AgentCategory, float]:
+    """
+    Keyword-based intent classification (fallback).
+    
+    Original scoring algorithm: counts keyword matches per category,
+    multi-word keywords score higher, confidence = max_score / total_score.
     
     Args:
         query: User's message
@@ -244,17 +335,37 @@ def classify_intent(query: str) -> Tuple[AgentCategory, float]:
     return max_category, confidence
 
 
-def get_agent_for_query(query: str) -> Dict:
+def classify_intent(query: str, router_llm=None) -> Tuple[AgentCategory, float]:
+    """
+    Classify user query to determine which agent should handle it.
+    
+    Uses LLM-based classification when router_llm is provided,
+    falling back to keyword-based classification otherwise or on error.
+    
+    Args:
+        query: User's message
+        router_llm: Optional ChatOpenAI instance for LLM-based routing
+        
+    Returns:
+        Tuple of (AgentCategory, confidence_score)
+    """
+    if router_llm:
+        return classify_intent_llm(query, router_llm)
+    return classify_intent_keywords(query)
+
+
+def get_agent_for_query(query: str, router_llm=None) -> Dict:
     """
     Determine which agent should handle a query and return routing info.
     
     Args:
         query: User's message
+        router_llm: Optional ChatOpenAI instance for LLM-based routing
         
     Returns:
         Dict with agent info and routing decision
     """
-    category, confidence = classify_intent(query)
+    category, confidence = classify_intent(query, router_llm=router_llm)
     
     agent_info = {
         AgentCategory.TRAVEL: {

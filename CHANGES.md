@@ -1,33 +1,12 @@
-# 🎉 Orion Enhancement Summary
+# Orion AI — Feature Reference
 
-## Overview
-Orion AI Personal Assistant has been significantly enhanced with **35+ tools** and major architecture improvements!
-
----
-
-## 📊 What Changed?
-
-### **New Files Created:**
-1. ✅ **config.py** - Centralized configuration management
-2. ✅ **utils.py** - Logging, caching, rate limiting, error handling utilities
-3. ✅ **tools_enhanced.py** - Complete rewrite with 35+ categorized tools
-4. ✅ **.env.example** - Template for environment configuration
-5. ✅ **README.md** - Comprehensive documentation
-6. ✅ **SETUP.md** - Step-by-step installation guide
-
-### **Modified Files:**
-1. ✅ **app.py** - Enhanced Gradio UI with statistics, file upload, export
-2. ✅ **orion.py** - Updated to use new tools, added logging and error handling
-3. ✅ **requirements.txt** - Added all new dependencies
-
-### **Preserved Files:**
-- ✅ **tools.py** - Original file kept intact (can be removed if desired)
+> Quick reference of all capabilities, tools, configuration, and usage examples.
 
 ---
 
-## 🆕 New Tools Added (25+ New Tools)
+## 60 Tools Across 9 Categories
 
-### A. Productivity Tools (10 tools)
+### Productivity Tools (12 tools)
 | Tool | Description |
 |------|-------------|
 | 📧 `send_email` | Send emails with attachments via SMTP |
@@ -40,13 +19,15 @@ Orion AI Personal Assistant has been significantly enhanced with **35+ tools** a
 | 📝 `create_note` | Create notes in Markdown format |
 | 📝 `search_notes` | Search notes by keyword |
 | 📸 `take_screenshot` | Capture screenshots |
+| 📱 `send_push_notification` | Push notifications via NTFY |
+| 🔲 `generate_qr_code` | Generate QR codes from text/URLs |
 
-### D. Document Processing (9 tools)
+### Document Processing / Media (15 tools)
 | Tool | Description |
 |------|-------------|
 | 📄 `read_pdf` | Extract text from PDF files |
 | 📄 `create_pdf` | Generate PDF from text |
-| 🔍 `extract_text_from_image` | OCR - Image to text |
+| 🔍 `extract_text_from_image` | OCR — Image to text |
 | 📊 `read_csv` | Read and analyze CSV files |
 | 📊 `read_excel` | Process Excel files |
 | 📋 `read_json_file` | Read JSON files |
@@ -54,252 +35,179 @@ Orion AI Personal Assistant has been significantly enhanced with **35+ tools** a
 | 📋 `csv_to_json` | Convert CSV to JSON |
 | 📝 `markdown_to_html` | Convert Markdown to HTML |
 | 📝 `html_to_markdown` | Convert HTML to Markdown |
+| 🎬 `search_youtube` | Search YouTube videos |
+| 🎬 `get_youtube_transcript` | Get video transcripts |
+| 🎵 `play_audio` | Play audio files |
+| 🖼️ `download_image` | Download images from URL |
+| 📁 `read_file_content` / `write_file_content` | File I/O |
 
-### F. Communication (1 tool)
+### Travel (10 tools)
 | Tool | Description |
 |------|-------------|
-| 🔲 `generate_qr_code` | Generate QR codes from text/URLs |
+| ✈️ `search_flights` | Search flights between cities |
+| 🚆 `get_pnr_status` | Indian Railways PNR status |
+| 🚆 `get_train_schedule` | Train schedule lookup |
+| 🚆 `get_seat_availability` | Seat availability check |
+| 🚆 `get_live_train_status` | Live train tracking |
+| 🗺️ `parse_location` | Geocode addresses |
+| 📏 `get_distance` | Distance between locations |
+| 🌤️ `get_weather` | Current weather data |
+| 🌤️ `get_forecast` | Weather forecast |
+| 💱 `convert_currency` | Currency conversion |
 
-### Existing Tools (Enhanced)
-- 🌐 Web Search (Google Serper)
-- 🌍 Wikipedia
-- 🐍 Python REPL
-- 📁 File Management (read, write, copy, move, delete)
-- 🌐 Browser Automation (Playwright)
-- 📱 Push Notifications (NTFY)
+### Research (8 tools)
+| Tool | Description |
+|------|-------------|
+| 🔍 `web_search` | Google Serper web search |
+| 📚 `wikipedia_search` | Wikipedia articles |
+| 📖 `define_word` | Dictionary definitions |
+| 🌐 `browser_search` | Browser-based search |
+| 📰 `get_news` | Latest news headlines |
+| 🧮 `wolfram_alpha` | Computational answers |
+| 📊 `google_trends` | Trending topics |
+| 🔗 `fetch_url` | Fetch webpage content |
 
-**Total: 35+ Tools!**
+### Developer (7 tools)
+| Tool | Description |
+|------|-------------|
+| 🐍 `python_repl` | Execute Python code |
+| 💻 `github_get_repo_info` | GitHub repository info |
+| 💻 `github_list_pull_requests` | List GitHub PRs |
+| 💻 `github_create_issue` | Create GitHub issues |
+| 💻 `github_list_issues` | List GitHub issues |
+| 💻 `github_get_file_content` | Read files from repos |
+| 💻 `github_search_repos` | Search GitHub repositories |
 
----
+### Browser (7 tools — Playwright)
+| Tool | Description |
+|------|-------------|
+| 🌐 `navigate_browser` | Navigate to URL |
+| 🖱️ `click_element` | Click page elements |
+| 📋 `get_elements` | Get DOM elements |
+| 📄 `current_webpage` | Get current page info |
+| 📝 `extract_text` | Extract page text |
+| 🔗 `extract_hyperlinks` | Extract page links |
+| ✏️ `fill_text` | Fill form fields |
 
-## 🏗️ Architecture Improvements
+### Communication (2 tools)
+`send_email`, `read_recent_emails`
 
-### 1. Configuration Management (`config.py`)
-- ✅ Centralized configuration class
-- ✅ Environment variable management
-- ✅ Automatic directory creation
-- ✅ Default values for all settings
-
-### 2. Enhanced Utilities (`utils.py`)
-- ✅ **Logger Class**: Structured logging to console and file
-- ✅ **Cache Class**: In-memory caching with TTL
-- ✅ **RateLimiter Class**: API rate limiting protection
-- ✅ **Retry Decorators**: `@retry_on_error`, `@async_retry_on_error`
-- ✅ **Safe Execution**: Error-safe function wrappers
-- ✅ **Error Formatting**: User-friendly error messages
-
-### 3. Tool Organization (`tools_enhanced.py`)
-- ✅ Organized by category (productivity, documents, etc.)
-- ✅ Comprehensive error handling for each tool
-- ✅ Emoji indicators for visual clarity
-- ✅ Detailed docstrings and examples
-- ✅ Retry logic on network operations
-- ✅ Logging for all operations
-
-### 4. Enhanced UI (`app.py`)
-- ✅ **Session Statistics**: Track messages and tool usage
-- ✅ **File Upload Widget**: Attach files to messages
-- ✅ **Export Conversations**: Save chat history as JSON
-- ✅ **Visual Tool List**: Display available tools
-- ✅ **Status Indicators**: Real-time system status
-- ✅ **Modern Theme**: Purple gradient theme
-- ✅ **Better Layout**: Organized with columns and sections
-
-### 5. Core Engine Updates (`orion.py`)
-- ✅ Integrated logging throughout
-- ✅ Tool usage tracking
-- ✅ Better error handling in worker
-- ✅ Configuration-based initialization
-- ✅ Enhanced system message with tool descriptions
+### System (4 tools)
+`take_screenshot`, `send_push_notification`, `read_file_content`, `write_file_content`
 
 ---
 
-## 📦 New Dependencies
+## Architecture
 
-Added to `requirements.txt`:
-- **google-auth-oauthlib** - Google Calendar OAuth
-- **google-api-python-client** - Google Calendar API
-- **PyPDF2** - PDF reading
-- **pdf2image** - PDF to image conversion
-- **reportlab** - PDF creation
-- **openpyxl** - Excel reading
-- **pandas** - Data manipulation
-- **pytesseract** - OCR engine
-- **qrcode** - QR code generation
-- **markdown** - Markdown to HTML
-- **html2text** - HTML to Markdown
-- And more...
+### Core Components
 
----
+| Component | File | Purpose |
+|-----------|------|---------|
+| **Config** | `core/config.py` | Centralized configuration, env variable management, startup validation |
+| **Utilities** | `core/utils.py` | Logger (dual-output), Cache (TTL), RateLimiter, CircuitBreaker |
+| **Models** | `core/models.py` | Pydantic input/output validation (`ChatRequest`, `HealthResponse`, `MetricsResponse`) |
+| **Agent** | `core/agent.py` | Orion class — LangGraph StateGraph with worker-evaluator pattern |
+| **Router** | `agents/router.py` | LLM intent classification with keyword fallback |
+| **Memory** | `core/memory.py` | SQLite conversation memory, retry queue, notification manager |
+| **Tools** | `tools/*.py` | 60 tools organized into 14 tool modules |
+| **Integrations** | `integrations/*.py` | Telegram, Gradio, Email Bot, Scheduler |
 
-## 🎨 UI Enhancements
+### Key Patterns
 
-### Before vs After
-
-**Before:**
-- Basic chat interface
-- No statistics
-- No file upload
-- Simple theme
-- No export functionality
-
-**After:**
-- Modern purple gradient theme
-- Session statistics (messages sent, tools used)
-- File upload widget (PDF, CSV, images, etc.)
-- Export conversation to JSON
-- Visual tool list in sidebar
-- Status indicators
-- Better organized layout
+- **Intent Routing**: LLM classifies queries into 9 categories; only category-relevant tools are bound to the worker LLM
+- **Circuit Breaker**: CLOSED → OPEN → HALF_OPEN state machine wrapping all LLM calls
+- **Per-User Rate Limiting**: Independent rate limit buckets (10 req/min) per user
+- **Thread Isolation**: `thread_id = f"{user_id}_{channel}"` — each user × channel gets its own LangGraph thread
+- **Structured Logging**: Dual-output (console + JSON) with correlation IDs traced end-to-end
+- **Graceful Shutdown**: In-flight request tracking, drain timeout, clean resource cleanup
 
 ---
 
-## 🔧 Configuration Features
+## Configuration
 
-### New Environment Variables
+### Environment Variables
 ```env
+# Required API Keys
+GROQ_API_KEY=your_groq_api_key
+GEMINI_API_KEY=your_gemini_api_key
+SERPER_API_KEY=your_serper_api_key
+
 # Email
-EMAIL_ADDRESS, EMAIL_PASSWORD
-SMTP_SERVER, SMTP_PORT
-IMAP_SERVER, IMAP_PORT
+EMAIL_ADDRESS=your_email@gmail.com
+EMAIL_PASSWORD=your_app_password
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+IMAP_SERVER=imap.gmail.com
+IMAP_PORT=993
+
+# Telegram
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_ALLOWED_USER_ID=your_user_id
 
 # Calendar
-GOOGLE_CALENDAR_CREDENTIALS
-GOOGLE_CALENDAR_TOKEN
-
-# Directories
-SANDBOX_DIR, NOTES_DIR, TASKS_DIR
-SCREENSHOTS_DIR, TEMP_DIR
-
-# Logging
-LOG_LEVEL, LOG_FILE
-
-# Rate Limiting
-MAX_REQUESTS_PER_MINUTE
-CACHE_TTL_SECONDS
+GOOGLE_CALENDAR_CREDENTIALS=path/to/credentials.json
 
 # Models
-WORKER_MODEL, EVALUATOR_MODEL
+WORKER_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+ROUTER_MODEL=llama-3.1-8b-instant
+
+# Tuning
+USER_REQUESTS_PER_MINUTE=10
+LOG_LEVEL=INFO
+CACHE_TTL_SECONDS=300
 ```
 
 ---
 
-## 📈 Performance Improvements
-
-1. **Caching**: Reduces redundant API calls
-2. **Rate Limiting**: Prevents API quota exhaustion
-3. **Retry Logic**: Automatic recovery from transient failures
-4. **Error Handling**: Graceful degradation instead of crashes
-5. **Logging**: Better debugging and monitoring
-
----
-
-## 🔐 Security Enhancements
-
-1. **Sandboxed File Operations**: All file ops restricted to sandbox directory
-2. **Environment Variables**: Sensitive data in .env (not in code)
-3. **Error Message Sanitization**: Don't expose sensitive info in errors
-4. **Rate Limiting**: Prevent abuse and excessive API usage
-
----
-
-## 📚 Documentation
-
-1. **README.md**: Comprehensive guide with examples
-2. **SETUP.md**: Step-by-step installation guide
-3. **.env.example**: All configuration options documented
-4. **Code Comments**: Extensive inline documentation
-5. **Tool Descriptions**: Clear descriptions for AI and users
-
----
-
-## 🚀 How to Use New Features
+## Usage Examples
 
 ### Email Management
-```python
-# Send email
+```
 "Send an email to john@example.com with subject 'Hello' and body 'How are you?'"
-
-# Read emails
 "Show me my last 5 unread emails"
 ```
 
 ### Calendar
-```python
-# Create event
+```
 "Create a calendar event 'Team Meeting' tomorrow at 2 PM for 1 hour"
-
-# List events
 "Show me my calendar for the next 7 days"
 ```
 
 ### Task Management
-```python
-# Create task
+```
 "Create a high priority task 'Finish report' due on 2026-01-25"
-
-# List tasks
 "Show me all my pending tasks"
-
-# Complete task
 "Mark task #1 as completed"
 ```
 
 ### Notes
-```python
-# Create note
+```
 "Create a note titled 'Meeting Notes' with content about today's discussion"
-
-# Search notes
 "Find notes containing 'meeting'"
 ```
 
 ### Document Processing
-```python
-# Read PDF
+```
 "Extract text from document.pdf in the sandbox folder"
-
-# OCR
 "Extract text from the image screenshot.png"
-
-# Read CSV
 "Show me the first 10 rows of sales_data.csv"
-
-# Convert
 "Convert data.csv to JSON format"
 ```
 
+### Developer
+```
+"Show me the open pull requests for langchain-ai/langchain"
+"Run this Python code: print(sum(range(100)))"
+```
+
 ### QR Code
-```python
-# Generate QR
+```
 "Generate a QR code for https://example.com"
 ```
 
 ---
 
-## ⚡ Quick Migration Guide
-
-### If you want to keep both versions:
-1. Current code is unchanged in `tools.py`
-2. New code is in `tools_enhanced.py`
-3. Switch by changing import in `orion.py`
-
-### To use new version (recommended):
-1. Update `.env` with new variables from `.env.example`
-2. Install new dependencies: `pip install -r requirements.txt`
-3. Install Tesseract OCR for image text extraction
-4. Run `python app.py`
-
-### To revert to old version:
-1. Change import in `orion.py`:
-   ```python
-   from tools import playwright_tools, other_tools
-   ```
-2. Remove new imports (config, utils)
-
----
-
-## 🎯 Next Steps
+## Getting Started
 
 1. **Install Dependencies**:
    ```bash
@@ -315,59 +223,20 @@ WORKER_MODEL, EVALUATOR_MODEL
 
 3. **Install Tesseract OCR** (for OCR features)
 
-4. **Test Run**:
+4. **Run**:
    ```bash
-   python app.py
+   python main.py telegram    # Telegram bot
+   python main.py gradio      # Web UI
+   python main.py test        # Connection test
+   python main.py info        # Show config
    ```
 
-5. **Try New Features**:
-   - Create a task
-   - Take a screenshot
-   - Generate a QR code
-   - Read a PDF
-   - Send yourself a test email (if configured)
-
 ---
 
-## 🎊 Summary
+## Support
 
-**What You Get:**
-- ✅ 25+ new powerful tools
-- ✅ Modern UI with statistics and export
-- ✅ Professional error handling and logging
-- ✅ Configuration management system
-- ✅ Comprehensive documentation
-- ✅ Better performance with caching
-- ✅ Security improvements
-- ✅ Easy setup with guides
-
-**What's Preserved:**
-- ✅ All original functionality intact
-- ✅ Same LangGraph workflow
-- ✅ Same LLM models
-- ✅ Backward compatible (can switch back)
-
-**Effort Required:**
-- 📦 Install new dependencies (~5 mins)
-- ⚙️ Configure API keys in .env (~10 mins)
-- 🔧 Optional: Set up email/calendar (~15 mins)
-
-**Result:**
-- 🚀 Production-ready AI assistant
-- 💼 Professional tool for daily use
-- 🎯 35+ tools at your command
-- 📈 Better than 90% of AI assistants out there!
-
----
-
-## 🤝 Support
-
-Need help? Check:
-1. **SETUP.md** for installation issues
-2. **README.md** for feature documentation
-3. **orion.log** for debugging
-4. **.env.example** for configuration options
-
----
-
-**Congratulations! Orion is now a enterprise-grade AI Personal Assistant! 🎉**
+- **SETUP.md** — Installation guide
+- **README.md** — Full documentation
+- **ARCHITECTURE.md** — Technical deep-dive
+- **orion.log** — Runtime logs
+- **.env.example** — All configuration options

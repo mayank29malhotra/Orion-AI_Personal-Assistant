@@ -1,59 +1,113 @@
-# Environment and secrets
+# =============================================================================
+# ORION AI PERSONAL ASSISTANT — .gitignore
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Environment & Secrets
+# ---------------------------------------------------------------------------
 .env
-.env.local
-.env.production
-
-# Python virtual environments - MUST be excluded
-.venv/
-.venv
-venv/
-venv
-env/
-.Python
-*.dll
-*.exe
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-
-# Google credentials (sensitive)
+.env.*
+!.env.example
 google_cred/
 credentials.json
 token.json
 
-# Memory and data files (persistent data)
-sandbox/data/*.db
-orion_memory.db
-orion_retry_queue.db
-scheduled_tasks.db
+# ---------------------------------------------------------------------------
+# Python — bytecode / cache
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
 
+# ---------------------------------------------------------------------------
+# Python — virtual environments
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# ---------------------------------------------------------------------------
+# Python — distribution / packaging
+# ---------------------------------------------------------------------------
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+*.whl
+
+# ---------------------------------------------------------------------------
+# Python — test / coverage
+# ---------------------------------------------------------------------------
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.tox/
+.nox/
+
+# ---------------------------------------------------------------------------
 # Logs
+# ---------------------------------------------------------------------------
 *.log
-orion.log
 
-# IDE
+# ---------------------------------------------------------------------------
+# Databases (created at runtime)
+# ---------------------------------------------------------------------------
+*.db
+
+# ---------------------------------------------------------------------------
+# Sandbox — all runtime / user data
+# ---------------------------------------------------------------------------
+sandbox/
+
+# ---------------------------------------------------------------------------
+# IDE / Editor
+# ---------------------------------------------------------------------------
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
+# ---------------------------------------------------------------------------
 # OS files
+# ---------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+Desktop.ini
+ehthumbs.db
 
-# HuggingFace persistent storage is at /data
-# These will be created at runtime
-sandbox/notes/
-sandbox/tasks/
-sandbox/screenshots/
-sandbox/temp/
-/sandbox
-sandbox/data/tasks.json
-sandbox\data\tasks.json
+# ---------------------------------------------------------------------------
+# Compiled / native extensions
+# ---------------------------------------------------------------------------
+*.so
+*.dll
+*.dylib
+*.exe
 
+# ---------------------------------------------------------------------------
+# Jupyter Notebook
+# ---------------------------------------------------------------------------
+.ipynb_checkpoints/
 
+# ---------------------------------------------------------------------------
+# Project-specific exclusions
+# ---------------------------------------------------------------------------
+# Internal audit & project memory (local-only)
 audit.md
+project_memory/
+master_prompt.txt
+
+# Empty nested clone (should not be tracked)
+Orion-AI_Personal-Assistant/
+
+SDE2_UPGRADE_PLAN.md

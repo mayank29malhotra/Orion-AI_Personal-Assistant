@@ -6,6 +6,9 @@ import sys
 import os
 from pathlib import Path
 
+# Add project root (parent of tests/) to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 def print_status(message, status="info"):
     """Print colored status messages"""
     colors = {

@@ -27,10 +27,13 @@ from pydantic import BaseModel, Field
 import uuid
 import asyncio
 import time
+import threading
 from datetime import datetime
 
 from core.config import Config
-from core.utils import logger, RateLimiter, async_retry_on_error
+from core.utils import logger, RateLimiter, CircuitBreaker, async_retry_on_error
+from core.models import ChatRequest
+from agents.router import classify_intent, get_agent_for_query, AgentCategory, TOOL_CATEGORIES, ROUTER_SYSTEM_PROMPT, RouterClassification
 
 load_dotenv(override=True)
 
@@ -60,16 +63,24 @@ class Orion:
     """
     
     def __init__(self):
-        self.worker_llm_with_tools = None
+        self.worker_llm = None              # Unbound worker LLM (for dynamic tool binding)
+        self.worker_llm_with_tools = None    # Worker LLM bound to ALL tools (fallback)
         self.evaluator_llm_with_output = None
+        self.router_llm = None               # Lightweight LLM for intent classification
         self.tools = None
         self.llm_with_tools = None
         self.graph = None
         self.orion_id = str(uuid.uuid4())
+        # Checkpoint storage — currently in-memory via MemorySaver.
+        # Migration path: swap to RedisSaver/PostgresSaver for horizontal scaling.
+        # Same BaseCheckpointSaver interface — zero code changes in graph logic.
         self.memory = MemorySaver()
         self.browser = None
         self.playwright = None
         self.tool_usage_count = 0
+        
+        # Router: tool index by category for focused tool selection
+        self._tool_index = {}  # {AgentCategory: [tool_objects]}
         
         # Rate limiting for LLM calls (protect free tier limits)
         self.llm_rate_limiter = RateLimiter(
@@ -77,6 +88,38 @@ class Orion:
             period=60
         )
         self.last_llm_call = 0
+        
+        # Circuit breaker: fail fast when Groq is down instead of burning retries.
+        # Already user-agnostic — works identically for 1 or N users.
+        self.llm_circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout=60,
+            name="groq_llm"
+        )
+        
+        # Per-user rate limiter: prevents one noisy user from starving others.
+        # Currently in-memory dict. Migration path: Redis INCR with TTL for
+        # distributed rate limiting across multiple Orion instances.
+        self.user_rate_limiter = RateLimiter(
+            max_calls=Config.USER_REQUESTS_PER_MINUTE,
+            period=60
+        )
+        
+        # --- Observability: request metrics + latency samples (Phase 3) ---
+        self._request_metrics = {
+            "total_requests": 0,
+            "successful": 0,
+            "failed": 0,
+            "rate_limited": 0,
+            "circuit_broken": 0,
+        }
+        self._latency_samples = []       # Rolling window of last 100 e2e latencies (ms)
+        self._worker_latency_samples = [] # Rolling window of last 100 worker LLM latencies (ms)
+        
+        # --- Graceful shutdown + in-flight tracking (Phase 4) ---
+        self._shutting_down = False
+        self._in_flight_requests = 0
+        self._in_flight_lock = threading.Lock()
         
         # Conversation memory (persistent)
         self.conversation_memory = None
@@ -92,6 +135,11 @@ class Orion:
         from core.memory import ConversationMemory
         
         logger.info("Starting Orion setup...")
+        
+        # --- Phase 4: Fail-fast config validation before any heavy initialization ---
+        config_warnings = Config.validate_or_fail()  # Raises ConfigValidationError on critical issues
+        if config_warnings:
+            logger.warning(f"Config validation: {len(config_warnings)} warning(s) at startup")
         
         # Initialize persistent conversation memory
         self.conversation_memory = ConversationMemory()
@@ -128,7 +176,7 @@ class Orion:
         
         GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
-        worker_llm = ChatOpenAI(
+        self.worker_llm = ChatOpenAI(
             model=Config.WORKER_MODEL,
             base_url=GROQ_BASE_URL,
             api_key=Config.GROQ_API_KEY,
@@ -137,7 +185,26 @@ class Orion:
             max_retries=2
         )
         logger.info("Worker LLM initialized")
-        self.worker_llm_with_tools = worker_llm.bind_tools(self.tools)
+        self.worker_llm_with_tools = self.worker_llm.bind_tools(self.tools)
+        
+        # Build tool index for router-based focused tool selection
+        self._build_tool_index()
+
+        # Initialize lightweight router LLM for intent classification
+        # Uses llama-3.1-8b-instant: 14,400 RPD (separate quota from worker)
+        router_base_llm = ChatOpenAI(
+            model=Config.ROUTER_MODEL,
+            base_url=GROQ_BASE_URL,
+            api_key=Config.GROQ_API_KEY,
+            http_client=http_client,
+            http_async_client=async_http_client,
+            max_retries=1,
+            temperature=0,  # Deterministic classification
+        )
+        self.router_llm = router_base_llm.with_structured_output(
+            RouterClassification
+        )
+        logger.info(f"Router LLM initialized ({Config.ROUTER_MODEL})")
 
         evaluator_llm = ChatOpenAI(
             model=Config.EVALUATOR_MODEL,
@@ -152,6 +219,66 @@ class Orion:
         
         await self.build_graph()
         logger.info("Orion setup completed successfully")
+
+    def _build_tool_index(self):
+        """Build an index mapping AgentCategory → list of tool objects.
+        
+        Uses TOOL_CATEGORIES from agents/router.py to map tool names to categories,
+        then resolves tool names to actual tool objects from self.tools.
+        This enables the router to select focused tool subsets per query.
+        """
+        self._tool_index = {cat: [] for cat in AgentCategory}
+        
+        # Build a name→tool lookup from loaded tools
+        tool_by_name = {tool.name: tool for tool in self.tools}
+        
+        # Map each tool to its category
+        categorized_tool_names = set()
+        for tool_name, category in TOOL_CATEGORIES.items():
+            if tool_name in tool_by_name:
+                self._tool_index[category].append(tool_by_name[tool_name])
+                categorized_tool_names.add(tool_name)
+        
+        # Any tool not in TOOL_CATEGORIES goes into GENERAL (catch-all)
+        for tool in self.tools:
+            if tool.name not in categorized_tool_names:
+                self._tool_index[AgentCategory.GENERAL].append(tool)
+        
+        # Log the index
+        for cat, cat_tools in self._tool_index.items():
+            if cat_tools:
+                logger.info(f"Router index: {cat.value} → {len(cat_tools)} tools")
+        
+        logger.info(f"Tool index built: {len(self.tools)} tools across {sum(1 for t in self._tool_index.values() if t)} categories")
+
+    def _get_tools_for_category(self, category: AgentCategory) -> list:
+        """Get focused tool set for a category.
+        
+        Returns the category-specific tools PLUS research tools (web_search, wikipedia)
+        as universal fallbacks. This ensures the LLM always has a search escape hatch
+        even when routed to a specialized category.
+        
+        Args:
+            category: The classified AgentCategory
+            
+        Returns:
+            List of tool objects for this category
+        """
+        focused_tools = list(self._tool_index.get(category, []))
+        
+        # Always include research tools as fallback (web_search, wikipedia_search)
+        # This ensures the agent can always search for info it doesn't have a tool for
+        if category != AgentCategory.RESEARCH:
+            research_tools = self._tool_index.get(AgentCategory.RESEARCH, [])
+            for tool in research_tools:
+                if tool not in focused_tools:
+                    focused_tools.append(tool)
+        
+        # If somehow we ended up with very few tools, fall back to all
+        if len(focused_tools) < 3:
+            return list(self.tools)
+        
+        return focused_tools
 
     def worker(self, state: State) -> Dict[str, Any]:
         """Worker node: processes tasks using tools."""
@@ -353,18 +480,66 @@ With this feedback, please continue the assignment, ensuring that you meet the s
         # Rate limiting: wait if needed to avoid hitting free tier limits
         self._apply_rate_limit_sync()
         
-        # Invoke the LLM with tools
+        # --- ROUTER: Classify intent and select focused tool set ---
+        # Extract the user's message text for classification
+        user_text = ""
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                user_text = msg.content
+                break
+        
+        # Route to focused tools or use all tools as fallback
+        routing = get_agent_for_query(user_text, router_llm=self.router_llm) if user_text else None
+        
+        if routing and routing["should_delegate"]:
+            category = routing["category"]
+            focused_tools = self._get_tools_for_category(category)
+            llm_to_use = self.worker_llm.bind_tools(focused_tools)
+            logger.info(
+                f"Router: {routing['agent']['icon']} {routing['agent']['name']} "
+                f"(confidence: {routing['confidence']:.2f}, tools: {len(focused_tools)}/{len(self.tools)})"
+            )
+        else:
+            llm_to_use = self.worker_llm_with_tools  # All tools (fallback)
+            logger.info(f"Router: 🤖 General Orion (all {len(self.tools)} tools)")
+        
+        # Invoke the LLM with selected tools
+        if not self.llm_circuit_breaker.can_execute():
+            cb_state = self.llm_circuit_breaker.get_state()
+            wait_hint = max(0, self.llm_circuit_breaker.recovery_timeout - (time.time() - self.llm_circuit_breaker.last_failure_time))
+            logger.warning(f"Circuit breaker OPEN -- failing fast (retry in {wait_hint:.0f}s)")
+            return {
+                "messages": [AIMessage(content=(
+                    "I'm temporarily unable to process requests. The LLM service appears to be down. "
+                    f"Please try again in about {int(wait_hint)} seconds."
+                ))]
+            }
+        
+        worker_start = time.time()
         try:
-            response = self.worker_llm_with_tools.invoke(messages)
+            response = llm_to_use.invoke(messages)
+            self.llm_circuit_breaker.record_success()
+            worker_ms = int((time.time() - worker_start) * 1000)
+            
+            # Track worker latency
+            self._worker_latency_samples.append(worker_ms)
+            if len(self._worker_latency_samples) > 100:
+                self._worker_latency_samples.pop(0)
             
             # Track tool usage
             if hasattr(response, "tool_calls") and response.tool_calls:
                 self.tool_usage_count += len(response.tool_calls)
-                logger.info(f"Worker invoked {len(response.tool_calls)} tools")
+                logger.info(f"Worker invoked {len(response.tool_calls)} tools in {worker_ms}ms",
+                            event="worker_tool_calls", tool_count=len(response.tool_calls), latency_ms=worker_ms)
+            else:
+                logger.info(f"Worker LLM call completed in {worker_ms}ms",
+                            event="worker_llm_call", latency_ms=worker_ms)
             
             return {"messages": [response]}
         except Exception as e:
-            logger.error(f"Worker error: {str(e)}")
+            self.llm_circuit_breaker.record_failure()
+            worker_ms = int((time.time() - worker_start) * 1000)
+            logger.error(f"Worker error: {str(e)}", event="worker_error", latency_ms=worker_ms)
             error_message = AIMessage(content=f"I encountered an error: {str(e)}")
             return {"messages": [error_message]}
 
@@ -423,7 +598,36 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
             HumanMessage(content=user_message),
         ]
 
-        eval_result = self.evaluator_llm_with_output.invoke(evaluator_messages)
+        # Circuit breaker check for evaluator LLM call
+        if not self.llm_circuit_breaker.can_execute():
+            logger.warning("Circuit breaker OPEN -- skipping evaluator, treating as success")
+            return {
+                "messages": [{"role": "assistant", "content": "Evaluator skipped (LLM temporarily unavailable)"}],
+                "feedback_on_work": "",
+                "success_criteria_met": True,
+                "user_input_needed": False,
+            }
+
+        eval_start = time.time()
+        try:
+            eval_result = self.evaluator_llm_with_output.invoke(evaluator_messages)
+            self.llm_circuit_breaker.record_success()
+            eval_ms = int((time.time() - eval_start) * 1000)
+            logger.info(f"Evaluator completed in {eval_ms}ms (met={eval_result.success_criteria_met})",
+                        event="evaluator_complete", latency_ms=eval_ms,
+                        success_criteria_met=eval_result.success_criteria_met)
+        except Exception as e:
+            self.llm_circuit_breaker.record_failure()
+            eval_ms = int((time.time() - eval_start) * 1000)
+            logger.error(f"Evaluator error: {str(e)} -- treating as success",
+                         event="evaluator_error", latency_ms=eval_ms)
+            return {
+                "messages": [{"role": "assistant", "content": f"Evaluator error: {str(e)}"}],
+                "feedback_on_work": "",
+                "success_criteria_met": True,
+                "user_input_needed": False,
+            }
+
         new_state = {
             "messages": [
                 {
@@ -520,7 +724,61 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
             user_id: Optional user ID for persistent memory
             channel: Channel name (telegram, email, api, etc.)
         """
-        config = {"configurable": {"thread_id": self.orion_id}}
+        # --- Phase 4: Input validation (fail early before any LLM work) ---
+        from pydantic import ValidationError
+        try:
+            validated = ChatRequest(
+                message=message,
+                user_id=user_id or "anonymous",
+                channel=channel,
+                success_criteria=success_criteria or "The answer should be clear and accurate",
+            )
+            # Use validated (sanitized) values downstream
+            message = validated.message
+            user_id = validated.user_id if user_id else None
+            channel = validated.channel
+            success_criteria = validated.success_criteria
+        except ValidationError as e:
+            error_details = "; ".join(
+                f"{err['loc'][-1]}: {err['msg']}" for err in e.errors()
+            )
+            logger.warning(f"Input validation failed: {error_details}",
+                           event="input_validation_error", errors=error_details)
+            self._request_metrics["failed"] += 1
+            return history + [[message, f"Invalid request: {error_details}"]]
+
+        # --- Phase 4: Reject requests during graceful shutdown ---
+        if self._shutting_down:
+            logger.warning("Request rejected: system is shutting down",
+                           event="shutdown_reject", user_id=user_id)
+            return history + [[message, "The system is shutting down. Please try again shortly."]]
+
+        # Per-user thread isolation: each user x channel gets its own LangGraph checkpoint.
+        # This prevents User B from seeing User A's in-flight state.
+        # Already multi-user aware -- no changes needed when scaling to N users.
+        thread_id = f"{user_id}_{channel}" if user_id else self.orion_id
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # --- Per-user rate limiting: fairness guard ---
+        if user_id and not self.user_rate_limiter.check(f"user:{user_id}"):
+            wait = self.user_rate_limiter.wait_time(f"user:{user_id}")
+            logger.warning(f"Per-user rate limit hit for {user_id}",
+                           event="rate_limit_hit", user_id=user_id, wait_seconds=int(wait))
+            self._request_metrics["rate_limited"] += 1
+            return history + [[message, (
+                f"You're sending requests too quickly. "
+                f"Please wait about {int(wait)} seconds before trying again."
+            )]]
+
+        # --- Generate correlation ID for request tracing (Phase 3) ---
+        request_id = str(uuid.uuid4())[:8]
+        e2e_start = time.time()
+        self._request_metrics["total_requests"] += 1
+        
+        logger.info(f"Superstep start [{request_id}] for: {message[:50]}...",
+                    event="superstep_start", request_id=request_id,
+                    user_id=user_id, channel=channel,
+                    message_preview=message[:80])
 
         state = {
             "messages": message,
@@ -531,6 +789,10 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
         }
         
         try:
+            # --- Phase 4: Track in-flight requests for graceful shutdown ---
+            with self._in_flight_lock:
+                self._in_flight_requests += 1
+
             logger.info(f"Running superstep for message: {message[:50]}...")
             
             # Save user message to persistent memory if user_id provided
@@ -556,11 +818,25 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
                     content=assistant_message
                 )
             
-            logger.info("Superstep completed successfully")
+            # --- Latency tracking (Phase 3) ---
+            e2e_ms = int((time.time() - e2e_start) * 1000)
+            self._latency_samples.append(e2e_ms)
+            if len(self._latency_samples) > 100:
+                self._latency_samples.pop(0)
+            self._request_metrics["successful"] += 1
+            
+            logger.info(f"Superstep complete [{request_id}] in {e2e_ms}ms",
+                        event="superstep_complete", request_id=request_id,
+                        user_id=user_id, channel=channel, latency_ms=e2e_ms)
+            
             # Return in tuple format: (user_message, assistant_message)
             return history + [[message, assistant_message]]
         except Exception as e:
-            logger.error(f"Error in run_superstep: {str(e)}")
+            e2e_ms = int((time.time() - e2e_start) * 1000)
+            self._request_metrics["failed"] += 1
+            logger.error(f"Error in run_superstep [{request_id}]: {str(e)}",
+                         event="superstep_error", request_id=request_id,
+                         user_id=user_id, latency_ms=e2e_ms, error=str(e))
             
             # Add to retry queue if user_id is provided
             if user_id:
@@ -576,7 +852,50 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
                 error_msg = f"I apologize, but I encountered an error: {str(e)}"
             
             return history + [[message, error_msg]]
+        finally:
+            # Always decrement in-flight counter (Phase 4: graceful shutdown)
+            with self._in_flight_lock:
+                self._in_flight_requests -= 1
     
+    def get_metrics(self) -> dict:
+        """Return observability metrics for the /metrics endpoint.
+        
+        Includes request counts, latency percentiles, circuit breaker state,
+        and tool usage stats. Designed for JSON serialization.
+        """
+        import statistics
+        
+        # Compute latency percentiles from rolling samples
+        def _percentiles(samples):
+            if not samples:
+                return {"p50": 0, "p90": 0, "p99": 0, "avg": 0, "count": 0}
+            sorted_s = sorted(samples)
+            n = len(sorted_s)
+            return {
+                "p50": sorted_s[n // 2],
+                "p90": sorted_s[int(n * 0.9)] if n >= 10 else sorted_s[-1],
+                "p99": sorted_s[int(n * 0.99)] if n >= 100 else sorted_s[-1],
+                "avg": int(statistics.mean(sorted_s)),
+                "count": n,
+            }
+        
+        return {
+            "requests": dict(self._request_metrics),
+            "latency_ms": {
+                "e2e": _percentiles(self._latency_samples),
+                "worker_llm": _percentiles(self._worker_latency_samples),
+            },
+            "circuit_breaker": self.llm_circuit_breaker.get_state(),
+            "tools": {
+                "total_loaded": len(self.tools) if self.tools else 0,
+                "tool_calls_this_session": self.tool_usage_count,
+            },
+            "shutdown": {
+                "shutting_down": self._shutting_down,
+                "in_flight_requests": self._in_flight_requests,
+            },
+        }
+
     def get_conversation_history(self, user_id: str, channel: str = None, limit: int = None) -> List[Dict]:
         """Get persistent conversation history for a user."""
         if not self.conversation_memory:
@@ -588,6 +907,54 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
     def get_tool_usage_count(self) -> int:
         """Get the number of tools used in this session."""
         return self.tool_usage_count
+
+    async def graceful_shutdown(self, timeout: int = 30):
+        """Graceful shutdown: stop accepting new requests, wait for in-flight to finish.
+        
+        Phase 4 Hardening: prevents data loss from abrupt termination.
+        
+        Args:
+            timeout: Maximum seconds to wait for in-flight requests before force-closing.
+        
+        Returns:
+            dict with shutdown stats (requests_drained, forced, elapsed_s)
+        """
+        logger.info("Initiating graceful shutdown...",
+                     event="shutdown_start", timeout_s=timeout,
+                     in_flight=self._in_flight_requests)
+        
+        # 1. Stop accepting new requests (run_superstep checks this flag)
+        self._shutting_down = True
+        
+        # 2. Wait for in-flight requests to complete (with timeout)
+        start = time.time()
+        poll_interval = 0.5
+        while self._in_flight_requests > 0:
+            elapsed = time.time() - start
+            if elapsed >= timeout:
+                logger.warning(
+                    f"Shutdown timeout after {timeout}s with {self._in_flight_requests} request(s) still in-flight",
+                    event="shutdown_timeout",
+                    in_flight=self._in_flight_requests)
+                break
+            logger.info(f"Waiting for {self._in_flight_requests} in-flight request(s)... ({elapsed:.0f}s/{timeout}s)")
+            await asyncio.sleep(poll_interval)
+        
+        elapsed = round(time.time() - start, 1)
+        forced = self._in_flight_requests > 0
+        
+        # 3. Clean up resources
+        self.cleanup()
+        
+        result = {
+            "requests_drained": not forced,
+            "forced": forced,
+            "in_flight_at_shutdown": self._in_flight_requests,
+            "elapsed_s": elapsed,
+        }
+        logger.info(f"Graceful shutdown complete in {elapsed}s (forced={forced})",
+                     event="shutdown_complete", **result)
+        return result
 
     def cleanup(self):
         """Clean up resources (browser, playwright)."""
