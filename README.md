@@ -1,28 +1,52 @@
 # 🌟 Orion AI Personal Assistant
 
-An advanced AI-powered personal assistant with **35+ tools** across multiple categories including email management, calendar integration, document processing, web automation, and much more!
+An advanced AI-powered personal assistant with **60 tools** across **9 intelligent categories**, **production-grade reliability** (circuit breaker, rate limiting, graceful shutdown), **full observability** (structured logging, correlation IDs, metrics endpoint), and multi-channel access (Telegram, Gradio, Email, Scheduler). Features an **LLM-based intent router** that classifies queries and selects only the relevant tools per request.
+
+> **For detailed technical documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)**
 
 ## ✨ Features
 
 ### 🎯 Core Capabilities
+- **LLM-Based Intent Router**: Queries are classified into 9 categories (TRAVEL, COMMUNICATION, PRODUCTIVITY, DEVELOPER, MEDIA, RESEARCH, SYSTEM, BROWSER, GENERAL) using a dedicated Groq LLM (`llama-3.1-8b-instant`) with keyword-based fallback
+- **Focused Tool Selection**: Only category-relevant tools (+ research tools) are given to the LLM per query — reducing token usage by 60-87%
+- **Confidence-Based Routing**: Router returns a confidence score (0.0–1.0); low-confidence queries fall back to the full 60-tool set
 - **Intelligent Task Execution**: Uses LangGraph workflow with worker-evaluator pattern
 - **Persistent Memory**: Remembers conversations across sessions (SQLite-based)
-- **Rate Limiting**: Smart cooldowns to protect free tier API limits
+- **Per-User Thread Isolation**: Each user × channel combination gets its own conversation thread
+- **Circuit Breaker**: Fails fast when Groq LLM is down (5 failures → 60s recovery → probe → resume). Prevents cascading failures and gives users immediate feedback
+- **Per-User Rate Limiting**: Each user gets 10 requests/minute (configurable). Prevents one user from exhausting the shared API quota
+- **Health Check Endpoint**: `GET /health` returns subsystem status (200 healthy / 503 degraded). Load-balancer and monitoring compatible
+- **Structured Logging**: Dual-output — human-readable console + JSON file (`orion_structured.log`). Every log call accepts `**context` kwargs for structured data
+- **Correlation IDs**: Every request gets a unique `request_id` (8-char UUID) traced through worker → tools → evaluator for end-to-end debugging
+- **Metrics Endpoint**: `GET /metrics` exposes request counts, latency percentiles (p50/p90/p99), circuit breaker state, and queue depths
+- **Input Validation**: All incoming messages validated via Pydantic `ChatRequest` model before any LLM call — saves tokens on bad input
+- **Config Validation**: `Config.validate_or_fail()` at startup catches missing API keys, invalid numeric bounds, bad port ranges — fail fast before heavy initialization
+- **Graceful Shutdown**: In-flight request tracking, drain timeout (30s default), and clean resource cleanup on shutdown
+- **Rate Limiting**: Smart cooldowns to protect free tier API limits (global + per-user)
 - **Auto-Retry**: Failed requests automatically retry with notifications
 - **Error Handling**: Robust retry logic and comprehensive error reporting
 - **Tool Usage Tracking**: Monitor AI's tool usage in real-time
 - **Export Conversations**: Save your chat history in JSON format
 
-### 🆕 New Features
-- **🧠 Conversation Memory**: Orion remembers your previous conversations
-- **⏱️ Rate Limiting**: Automatic throttling for LLM free tier limits
+### 🛡️ Production-Grade Reliability & Observability
+- **🧠 LLM Intent Router**: Dual-path classification (LLM-first + keyword fallback) with Pydantic structured output
+- **🔒 Circuit Breaker**: CLOSED → OPEN → HALF_OPEN state machine for LLM calls (thread-safe)
+- **👤 Per-User Rate Limiting**: Independent rate limit buckets per user (10 req/min default)
+- **💓 Health Check**: `/health` with subsystem checks + circuit breaker state (200/503)
+- **📊 Metrics Endpoint**: `/metrics` with request counts, latency percentiles, CB state, queue depths
+- **📝 Structured Logging**: Dual-output logger (console + JSON) with `**context` kwargs
+- **🔗 Correlation IDs**: 8-char UUID per request traced end-to-end (worker → tools → evaluator)
+- **📏 Latency Tracking**: Rolling window (100 samples) with p50/p90/p99 percentile computation
+- **✅ Input Validation**: Pydantic `ChatRequest` model (message length, channel chars, whitespace)
+- **⚙️ Config Validation**: 11 validation checks at startup with critical/warning separation
+- **🛑 Graceful Shutdown**: `_shutting_down` flag, in-flight counter, drain-then-cleanup pattern
 - **🔄 Auto-Retry Queue**: Failed requests retry automatically (2 attempts, 5 min apart)
 - **📢 Multi-Channel Notifications**: Get notified on all channels if something fails
 - **☁️ Cloud Ready**: Deploy anywhere (Oracle Cloud Free, Docker, VPS)
 - **📋 Pending Request Queue**: Queries are saved when bot is down, processed when back online
 - **💓 Keep-Alive System**: Built-in self-ping for always-on deployment
 
-### 🔧 35+ Powerful Tools
+### 🔧 60 Powerful Tools (9 Categories)
 
 #### 📧 Email Management
 - **Send Emails**: Send emails with attachments via SMTP
@@ -207,23 +231,42 @@ Orion/
 ├── main.py                    # 🚀 Single entry point for all modes
 ├── requirements.txt           # Python dependencies
 ├── .env                       # Environment variables (not in git)
+├── ARCHITECTURE.md            # 📐 Detailed HLD/LLD technical docs
+├── SDE2_UPGRADE_PLAN.md       # 📋 Phased upgrade roadmap
 │
 ├── core/                      # 🧠 Core application logic
 │   ├── __init__.py           # Package exports with lazy loading
-│   ├── config.py             # Configuration management (Config class)
-│   ├── utils.py              # Logger, Cache, RateLimiter classes
+│   ├── config.py             # Config class, ROUTER_MODEL, validate_or_fail(), ConfigValidationError
+│   ├── models.py             # Pydantic models: ChatRequest, HealthResponse, MetricsResponse
+│   ├── utils.py              # Logger (dual-output), Cache, RateLimiter, CircuitBreaker
 │   ├── memory.py             # ConversationMemory, FailedRequestQueue, NotificationManager
-│   └── agent.py              # Main Orion class with LangGraph workflow
+│   └── agent.py              # Orion class: LangGraph workflow, router, metrics, graceful shutdown
 │
-├── tools/                     # 🔧 All 35+ tools organized by category
+├── agents/                    # 🤖 Intent classification & routing
+│   ├── __init__.py           # Package exports
+│   ├── base_agent.py         # AgentCategory enum (9 categories)
+│   ├── router.py             # LLM + keyword intent classifier, TOOL_CATEGORIES mapping
+│   ├── communication_agent.py
+│   ├── developer_agent.py
+│   ├── media_agent.py
+│   ├── productivity_agent.py
+│   ├── research_agent.py
+│   ├── system_agent.py
+│   └── travel_agent.py
+│
+├── tools/                     # 🔧 All 60 tools organized by category
 │   ├── __init__.py           # Package exports
 │   ├── loader.py             # Tool aggregator (get_all_tools)
 │   ├── browser.py            # Playwright web automation (lazy import)
 │   ├── calendar.py           # Google Calendar CRUD operations
 │   ├── documents.py          # PDF, OCR, CSV, Excel, JSON, Markdown, QR
 │   ├── email_tools.py        # Send/receive emails via SMTP/IMAP
+│   ├── flights.py            # Flight status lookups
+│   ├── github.py             # GitHub repo/issue/PR tools
+│   ├── indian_railways.py    # PNR status, train search
 │   ├── search.py             # Web search, Wikipedia, Python REPL
 │   ├── tasks_notes.py        # Task and note management
+│   ├── youtube.py            # YouTube search and info
 │   └── utils.py              # Screenshot, notifications, file ops
 │
 ├── integrations/              # 🔌 Multi-channel integrations
@@ -231,7 +274,17 @@ Orion/
 │   ├── telegram.py           # Telegram bot integration
 │   ├── gradio_ui.py          # Gradio web interface
 │   ├── email_bot.py          # Email-based interaction
+│   ├── proactive.py          # Proactive assistant features
 │   └── scheduler.py          # Background task scheduler
+│
+├── tests/                     # ✅ Test suite (82 tests across 4 phases)
+│   ├── __init__.py           # Package marker
+│   ├── test_phase1.py        # 7 tests: router, tool index, thread isolation, LLM
+│   ├── test_phase2.py        # 7 tests: circuit breaker, rate limiter, health check
+│   ├── test_phase3.py        # 36 tests: logging, metrics, latency, correlation IDs
+│   ├── test_phase4.py        # 32 tests: input validation, config, shutdown
+│   ├── test_setup.py         # Setup verification tests
+│   └── test_local.py         # Interactive CLI tester
 │
 ├── google_cred/               # 🔐 Google OAuth credentials
 │   ├── credentials.json      # OAuth client credentials
@@ -267,10 +320,17 @@ python main.py info
 ```
 
 ### Workflow Architecture
-1. **Worker Agent**: Uses LLM with tools to execute tasks
-2. **Tool Node**: Executes selected tools
-3. **Evaluator Agent**: Assesses completion and provides feedback
-4. **Memory System**: Persists conversation state
+1. **Input Validation**: `ChatRequest` Pydantic model validates message (1-10000 chars, non-blank), channel (alphanumeric), and user_id before any processing
+2. **Shutdown Check**: If `_shutting_down` flag is set, reject immediately with friendly message
+3. **Per-User Rate Limit**: Check user's request bucket (10/min default). If exceeded, return wait time
+4. **Intent Router** (LLM-first): Classifies query → category + confidence using `llama-3.1-8b-instant` (14,400 req/day free tier, separate quota from worker). Falls back to keyword scoring on error
+5. **Circuit Breaker Check**: If circuit is OPEN, fail fast with "service unavailable" message
+6. **Focused Tool Selection**: Category-specific tools + research tools are bound to the worker LLM (e.g., TRAVEL query gets 18 tools instead of 60)
+7. **Worker Agent**: Uses `llama-4-scout-17b-16e-instruct` with focused tools to execute tasks
+8. **Tool Node**: Executes selected tools
+9. **Evaluator Agent**: Assesses completion and provides feedback
+10. **Memory System**: Persists conversation state per user×channel thread
+11. **Metrics**: Records latency (e2e + worker), increments success/failure counters, logs structured events with correlation ID
 
 ## 🔧 Configuration
 
@@ -293,30 +353,82 @@ EMAIL_PASSWORD=your_app_password
 ### Custom Configuration
 Edit `config.py` to customize:
 - Directory locations
-- Model selection
+- Model selection (`MODEL_NAME` for worker/evaluator, `ROUTER_MODEL` for intent classifier)
 - Rate limiting
 - Cache TTL
 - Logging level
+
+### Running Tests
+```bash
+# Run all 82 tests
+python -m pytest tests/ -v
+
+# Run by phase
+python -m pytest tests/test_phase1.py -v   # Router + thread isolation (7 tests)
+python -m pytest tests/test_phase2.py -v   # Circuit breaker + rate limiter + health (7 tests)
+python -m pytest tests/test_phase3.py -v   # Logging + metrics + latency + correlation IDs (36 tests)
+python -m pytest tests/test_phase4.py -v   # Input validation + config + graceful shutdown (32 tests)
+```
+
+**82 automated tests** across 4 phases covering:
+- **Phase 1** (7): keyword/LLM classification, delegation, tool index (60 tools × 9 categories), focused selection, thread isolation
+- **Phase 2** (7): circuit breaker state transitions (CLOSED→OPEN→HALF_OPEN→CLOSED), fail-fast, probe failure, per-user rate limiter, health check JSON
+- **Phase 3** (36): structured logging with `**context`, JSON output validation, metrics attributes, `get_metrics()`, latency rolling windows (100-cap, percentiles), `/metrics` endpoint, correlation IDs, worker/evaluator instrumentation
+- **Phase 4** (32): `ChatRequest` model (valid/invalid inputs, defaults, length limits, channel chars, whitespace), config validation (numeric bounds, model names, ports, `validate_or_fail`, `ConfigValidationError`), graceful shutdown (flags, counters, locks, async method, result dict), metrics shutdown fields, in-flight tracking, lifespan integration
 
 ## 🛡️ Security & Best Practices
 
 - **Sandboxed Environment**: File operations restricted to sandbox directory
 - **API Key Protection**: Never commit `.env` file
-- **Rate Limiting**: Built-in protection against API overuse
-- **Error Handling**: Comprehensive try-catch blocks with logging
+- **Input Validation**: All inputs validated via Pydantic before reaching LLM (message length, channel chars, user ID sanitization)
+- **Config Validation**: Startup validation of all config values — fail fast on missing critical keys
+- **Circuit Breaker**: LLM calls wrapped in circuit breaker to prevent cascading failures
+- **Per-User Rate Limiting**: Independent per-user buckets (10 req/min) + global API key protection
+- **Graceful Shutdown**: In-flight requests drain cleanly before process exit (30s timeout)
+- **Error Handling**: Comprehensive try-catch blocks with structured logging and correlation IDs
 - **SSL Verification**: Configurable for corporate proxies
 
-## 📊 Monitoring & Logging
+## 📊 Monitoring & Observability
 
-### Logging
-- All operations logged to `orion.log`
-- Console output for real-time monitoring
-- Configurable log levels: DEBUG, INFO, WARNING, ERROR
+### Structured Logging (Dual-Output)
+- **Console + orion.log**: Human-readable format for development
+- **orion_structured.log**: JSON-structured logs with correlation IDs, latency, and context fields
+- All log methods accept `**context` kwargs: `logger.info("event", request_id="abc", latency_ms=120)`
+- Backward compatible — `logger.info("msg")` works unchanged
 
-### Statistics Tracking
-- Messages sent counter
-- Tools used counter
-- Session duration tracking
+### Correlation IDs
+- Every request gets a unique `request_id` (8-char UUID prefix)
+- Traced through: `superstep_start` → `worker_llm_call` → `worker_tool_calls` → `evaluator_complete` → `superstep_complete`
+- Filter with: `grep request_id=a1b2c3d4 orion_structured.log`
+
+### Metrics Endpoint (`GET /metrics`)
+```json
+{
+  "timestamp": "2026-02-23T10:00:00",
+  "orion": {
+    "requests": {"total": 150, "successful": 140, "failed": 5, "rate_limited": 3, "circuit_broken": 2},
+    "latency_ms": {
+      "e2e": {"p50": 2100, "p90": 4500, "p99": 8200, "avg": 2800, "count": 100},
+      "worker_llm": {"p50": 1200, "p90": 3000, "p99": 5500, "avg": 1600, "count": 100}
+    },
+    "circuit_breaker": {"state": "closed", "failure_count": 0},
+    "tools": 60,
+    "shutdown": {"shutting_down": false, "in_flight_requests": 1}
+  },
+  "memory": {"total_messages": 500, "total_users": 3},
+  "retry_queue": {"pending": 0, "completed": 12, "failed": 1}
+}
+```
+
+### Health Check (`GET /health`)
+- Returns **200** `{"status": "healthy"}` when all subsystems are up
+- Returns **503** `{"status": "degraded"}` when Orion not ready or circuit breaker is OPEN
+- Includes: `orion_ready`, `memory_db`, `retry_queue`, `llm_circuit_breaker` state
+
+### Latency Tracking
+- **End-to-end**: Measured in `run_superstep()`, rolling window of 100 samples
+- **Worker LLM**: Measured in `worker()`, separate rolling window of 100 samples
+- **Percentiles**: p50, p90, p99, avg, count computed via `_percentiles()` helper
 
 ## 🤝 Contributing
 
@@ -355,7 +467,21 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 
 ## 🔮 Roadmap
 
-Future enhancements:
+### ✅ Implemented
+- [x] LLM-based intent router with keyword fallback
+- [x] Per-user thread isolation
+- [x] Circuit breaker for LLM calls
+- [x] Per-user rate limiting
+- [x] Health check endpoint with subsystem status
+- [x] Structured logging with dual-output
+- [x] Correlation IDs for end-to-end tracing
+- [x] Metrics endpoint with latency percentiles
+- [x] Input validation via Pydantic models
+- [x] Config validation with fail-fast startup
+- [x] Graceful shutdown with drain timeout
+
+### 🔜 Future Enhancements
+- [ ] Centralized API Gateway (`/v1/chat` with bearer token auth)
 - [ ] Voice input/output
 - [ ] Advanced data visualization
 - [ ] Database query support
@@ -633,6 +759,58 @@ sudo systemctl stop orion
 cd ~/Orion-AI_Personal-Assistant
 git pull
 sudo systemctl restart orion
+```
+
+---
+
+## 🛠️ Technology Stack & Tradeoffs
+
+### Tech Used — and Why
+
+| Technology | Purpose | Why This Choice |
+|-----------|---------|-----------------|
+| **Python 3.8+** | Core language | LangChain/LangGraph ecosystem is Python-native. Rich async support for multi-channel I/O |
+| **LangGraph** | Agent orchestration | StateGraph with `worker→tools→evaluator→END` pattern. Built-in checkpointing, cycle handling, and state management. Better than raw LangChain agents for multi-step tasks |
+| **LangChain** | Tool framework | Standardized `BaseTool` interface for 60 tools. `ChatGroq` wrapper handles API calls, retries, and structured output |
+| **Groq (LLM Provider)** | LLM inference | Free tier with generous limits: 1K RPD for `llama-4-scout-17b` (worker), 14.4K RPD for `llama-3.1-8b-instant` (router). Fastest inference speeds available |
+| **llama-4-scout-17b-16e** | Worker + evaluator LLM | Best free-tier model for tool calling. 30K context window, good instruction following |
+| **llama-3.1-8b-instant** | Intent router LLM | 14,400 RPD (14× worker quota). 8B is sufficient for "classify into 1 of 9 categories". Separate quota = zero conflict with worker |
+| **Pydantic** | Input/output validation | Already a LangChain dependency (zero new deps). Type-safe structured output from LLM (`RouterClassification`), input validation (`ChatRequest`), config validation |
+| **SQLite** | Conversation memory + retry queue | Zero-config, file-based, perfect for single-user personal assistant. WAL mode for concurrent reads. No server process to manage |
+| **FastAPI** | HTTP endpoints | `/health`, `/metrics`, `/telegram/webhook`. Async-native, auto-generates OpenAPI docs, already used by Telegram integration |
+| **Gradio** | Web UI | One-line chat interface with file upload, session stats, export. No frontend build step required |
+| **Playwright** | Browser automation | 7 browser tools (navigate, click, extract, fill). Lazy-loaded — Orion works fine without it (53 tools instead of 60) |
+| **threading.Lock** | Concurrency safety | Circuit breaker + in-flight counter need thread safety. `threading.Lock` works in both sync (`worker()`) and async (`run_superstep()`) contexts |
+| **stdlib logging + JSON** | Structured logging | Dual-output (console + JSON) with `**context` kwargs. Zero new dependencies — extends existing Logger singleton |
+
+### Tech NOT Used — and Why Not
+
+| Technology | Why Excluded | When We'd Add It | Migration Path |
+|-----------|-------------|-------------------|----------------|
+| **PostgreSQL** | SQLite is correct for single-user, low-concurrency workloads. Postgres adds connection management overhead with no benefit at scale=1 | When concurrent writes exceed SQLite's single-writer lock (~10+ concurrent users) | Interface is already query-based — swap DB driver, no schema change |
+| **Redis** | In-memory `Dict[str, list]` for rate limiting and `MemorySaver` for checkpoints work fine for single-process deployment. Redis requires a running server | Multi-process or multi-node deployment needing shared state | Same key format (`user:{id}`). Swap `RateLimiter` dict for `Redis INCR + EXPIRE`. Swap `MemorySaver` for `RedisSaver` (same interface) |
+| **Kafka / RabbitMQ** | SQLite retry queue handles personal-assistant throughput (~5 msg/min). Message brokers add operational complexity (broker, consumers, monitoring) | >100 msg/sec throughput or multi-consumer processing | Queue interface (`push`, `pop`, `ack`) stays the same — backend swap only |
+| **Celery** | All long-running work uses async coroutines. Celery adds broker dependency + worker processes + monitoring infra with no benefit at current scale | When tool execution time exceeds HTTP timeout budget | Already async — Celery workers would wrap existing tool functions |
+| **structlog / loguru** | Existing Logger handles dual-output (console + JSON) with `**context` kwargs. Adding a library would change every call site or require maintaining two systems | Team project with 10+ services needing consistent log pipeline | Migration is a one-file change (`core/utils.py`) |
+| **Prometheus** | JSON `/metrics` endpoint is directly consumable by humans, scripts, and monitoring tools. Prometheus needs a running server + scrape config + Grafana | Multi-instance deployment needing metrics aggregation | Add `/metrics/prometheus` endpoint (~20 lines) or use `json_exporter` sidecar |
+| **Docker Compose (multi-service)** | Splitting a personal assistant into microservices is over-engineering. Monolith with clean module boundaries is correct for single-team | When teams independently deploy components (org structure drives service boundaries) | Module boundaries already exist (`core/`, `agents/`, `tools/`, `integrations/`) |
+| **Vector DB / RAG** | Not needed for current functionality. It's a feature addition, not an architectural upgrade | When conversation history exceeds keyword-search usefulness | Add Chroma/Pinecone for semantic memory search. Could index `ConversationMemory` |
+| **JWT / OAuth** | Telegram provides built-in authentication (`chat_id`). Adding auth to a personal bot is security theater | API gateway serving multiple external clients | FastAPI's `Depends(HTTPBearer())` with bearer tokens. 20-line addition |
+| **Load Testing (locust)** | Good practice but not a code change. Can be added later as a standalone script | Before production deployment at scale | Write `locustfile.py` targeting `/v1/chat` endpoint |
+
+### Design Philosophy
+
+> **"Designed for scale, deployed for one."**
+
+The multi-user patterns (thread isolation, per-user rate limits, circuit breaker) are **correctness requirements**, not scaling features. The abstractions are built so that scaling is a **backend swap, not an architecture rewrite**:
+
+```
+RateLimiter(key="user:123")     →  Same interface, swap dict for Redis INCR
+MemorySaver()                   →  Same interface, swap for RedisSaver()
+SQLite retry queue              →  Same push/pop interface, swap for Redis Streams
+thread_id = f"{user_id}_{ch}"   →  Already multi-user aware, no change needed
+CircuitBreaker()                →  Already user-agnostic, no change needed
+ChatRequest                     →  Already channel-agnostic validation
 ```
 
 ---
