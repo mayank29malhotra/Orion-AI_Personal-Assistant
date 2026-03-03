@@ -82,9 +82,21 @@ podman run -d --name orion \
   orion
 
 # -----------------------------------------------
+# 6b. Install Playwright Chromium inside container
+# (post-start to avoid OOM during build on low-RAM VMs)
+# -----------------------------------------------
+echo "🌐 Installing Playwright Chromium..."
+podman exec orion playwright install --with-deps chromium
+podman restart orion
+echo "✅ Playwright installed, container restarted"
+
+# Commit so Playwright persists across restarts
+podman commit orion orion:latest
+
+# -----------------------------------------------
 # 7. Verify
 # -----------------------------------------------
-sleep 5
+sleep 20
 echo "=========================================="
 echo "  Container status:"
 podman ps --filter name=orion --format "table {{.Names}} {{.Status}}"

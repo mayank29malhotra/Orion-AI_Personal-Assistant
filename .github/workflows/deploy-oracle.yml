@@ -69,7 +69,7 @@ jobs:
           cp -a ~/orion-data/. data/ 2>/dev/null || true
 
           # ------------------------------------------------
-          # 4. Build container (multi-stage, no browser)
+          # 4. Build container (multi-stage, with Playwright)
           # ------------------------------------------------
           echo "🔨 Building container..."
           podman build \
@@ -90,9 +90,21 @@ jobs:
             orion
 
           # ------------------------------------------------
+          # 5b. Install Playwright Chromium inside container
+          # (Done post-start to avoid OOM during build)
+          # ------------------------------------------------
+          echo "🌐 Installing Playwright Chromium..."
+          podman exec orion playwright install --with-deps chromium
+          podman restart orion
+          echo "✅ Playwright installed, container restarted"
+
+          # Commit the container so Playwright persists across restarts
+          podman commit orion orion:latest
+
+          # ------------------------------------------------
           # 6. Verify
           # ------------------------------------------------
-          sleep 5
+          sleep 20
           echo "=========================================="
           echo "  Container status:"
           podman ps --filter name=orion --format "table {{.Names}} {{.Status}} {{.Ports}}"
