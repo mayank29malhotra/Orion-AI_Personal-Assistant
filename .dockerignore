@@ -1,0 +1,30 @@
+# Ignore local dev / IDE / OS files
+.venv/
+__pycache__/
+*.pyc
+.git/
+.github/
+.env
+*.log
+*.bat
+
+# Duplicate inner project copy
+Orion-AI_Personal-Assistant/
+
+# Sandbox data (mounted as volume at runtime)
+sandbox/
+
+# Dev/test artifacts
+tests/
+scripts/
+test_*.py
+SDE2_AUDIT_REPORT.md
+TEST_PROMPTS.md
+CHANGES.md
+SETUP.md
+TELEGRAM_DEPLOYMENT.md
+RUNNING_AS_SERVICE.md
+README.md
+
+# Google credentials (injected via .env at runtime)
+google_cred/

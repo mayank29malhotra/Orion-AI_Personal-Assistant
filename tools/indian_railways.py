@@ -45,7 +45,7 @@ def check_pnr_status(pnr_number: str) -> str:
         if result:
             return result
         
-        return f"❌ Could not fetch PNR status for {pnr}. Please try again later or check on IRCTC website."
+        return f"❌ Could not fetch PNR status for {pnr}. The free APIs may be down or rate-limited. Please try again later or check the official IRCTC website."
         
     except Exception as e:
         logger.error(f"PNR check error: {e}")

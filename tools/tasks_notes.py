@@ -60,7 +60,8 @@ def create_task(
     title: str,
     description: str = "",
     due_date: Optional[str] = None,
-    priority: str = "medium"
+    priority: str = "medium",
+    attachments: Optional[str] = None  # comma-separated file paths or URLs
 ) -> str:
     """
     Create a new task.
@@ -82,6 +83,7 @@ def create_task(
             'description': description,
             'due_date': due_date,
             'priority': priority.lower(),
+            'attachments': attachments,
             'completed': False,
             'created_at': datetime.now().isoformat(),
             'completed_at': None
@@ -91,11 +93,22 @@ def create_task(
         _save_tasks(tasks)
         
         logger.info(f"Task created: {title} (ID: {task_id})")
+        # if a due date is provided, also create a calendar event for a reminder
+        if due_date:
+            try:
+                from tools.calendar import create_calendar_event
+                # schedule event at 9am local time by default
+                event_desc = description or ""
+                create_calendar_event(title=title, start_date=due_date, description=event_desc)
+                logger.info(f"Calendar event created for task {task_id} due {due_date}")
+            except Exception as e:
+                logger.warning(f"Failed to create calendar event for task {task_id}: {e}")
         
         priority_emoji = {'low': '🟢', 'medium': '🟡', 'high': '🔴'}.get(priority.lower(), '🟡')
         due_str = f" | 📅 Due: {due_date}" if due_date else ""
+        attach_str = f" | 📎 {attachments}" if attachments else ""
         
-        return f"✅ Task created!\n{priority_emoji} [{task_id}] {title}{due_str}"
+        return f"✅ Task created!\n{priority_emoji} [{task_id}] {title}{due_str}{attach_str}"
     
     except Exception as e:
         error_msg = f"Failed to create task: {str(e)}"
@@ -142,8 +155,9 @@ def list_tasks(show_completed: bool = False, priority: Optional[str] = None) -> 
                 task.get('priority', 'medium'), '🟡'
             )
             due_str = f" | 📅 {task.get('due_date')}" if task.get('due_date') else ""
+            attach_str = f" | 📎 {task.get('attachments')}" if task.get('attachments') else ""
             
-            result.append(f"{status} {priority_emoji} [{task['id']}] {task['title']}{due_str}")
+            result.append(f"{status} {priority_emoji} [{task['id']}] {task['title']}{due_str}{attach_str}")
             if task.get('description'):
                 result.append(f"   💬 {task['description'][:50]}...")
         
@@ -215,7 +229,7 @@ def delete_task(task_id: int) -> str:
 
 
 @tool
-def create_note(title: str, content: str, tags: str = "") -> str:
+def create_note(title: str, content: str, tags: str = "", attachments: Optional[str] = None) -> str:
     """
     Create a new note.
     
@@ -242,10 +256,11 @@ def create_note(title: str, content: str, tags: str = "") -> str:
         # Create markdown content with frontmatter
         tags_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
         
+        attachment_line = f"attachments: [{attachments}]\n" if attachments else ""
         note_content = f"""---
 title: {title}
 created: {datetime.now().isoformat()}
-tags: [{', '.join(tags_list)}]
+{attachment_line}tags: [{', '.join(tags_list)}]
 ---
 
 # {title}

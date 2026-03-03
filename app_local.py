@@ -71,12 +71,21 @@ async def initialize_orion():
         return False
 
 
-async def chat(message: str, history: list, success_criteria: str):
+async def chat(message: str, history: list, success_criteria: str, upload_files=None):
     """
     Process a user message through Orion.
     Uses Gradio's native async support — no asyncio.run() hacks.
     """
     global orion_instance
+
+    # If files were uploaded, append their paths to the message so Orion can reference them
+    if upload_files:
+        paths = []
+        for f in upload_files:
+            # Gradio gives a tempfile path
+            paths.append(f.name if hasattr(f, 'name') else str(f))
+        files_str = "\n\nAttached files: " + ", ".join(paths)
+        message = (message or "") + files_str
 
     if not message.strip():
         yield history, stats_text()
@@ -124,6 +133,24 @@ async def chat(message: str, history: list, success_criteria: str):
                 response = last[1]
             else:
                 response = str(last)
+
+        # Post-process response to linkify file paths / attachments
+        import re
+        def linkify(text: str) -> str:
+            # find paths ending with common extensions
+            pattern = r"((?:[A-Za-z]:\\|/)?(?:[\w\-./ ]+)[\\/][\w\-./ ]+\.(?:png|jpg|jpeg|gif|pdf|txt|html))"
+            def repl(m):
+                path = m.group(1)
+                esc = path.replace('\\', '/')
+                if esc.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    return f"![{os.path.basename(path)}](file://{esc})"
+                else:
+                    return f"[{os.path.basename(path)}](file://{esc})"
+            return re.sub(pattern, repl, text)
+        try:
+            response = linkify(response)
+        except Exception:
+            pass
         else:
             response = "Processed but no response generated."
 
@@ -232,6 +259,7 @@ with gr.Blocks(
                         lines=2,
                         scale=8,
                     )
+                    upload_files = gr.File(label="📎 Attach Files", file_count="multiple", file_types=[".pdf", ".csv", ".xlsx", ".json", ".txt", ".png", ".jpg"])
                     send_btn = gr.Button("🚀 Send", variant="primary", scale=1)
 
                 criteria = gr.Textbox(
@@ -267,21 +295,63 @@ with gr.Blocks(
             gr.Markdown("### 💡 Try These")
             gr.Examples(
                 examples=[
-                    ["What's on my calendar today?"],
-                    ["Search YouTube for Python async tutorials"],
-                    ["Check PNR status 1234567890"],
-                    ["Define the word 'serendipity'"],
-                    ["Search GitHub for LangGraph projects"],
-                    ["Create a note about today's standup"],
-                    ["What flights go from Delhi to Mumbai?"],
-                    ["Read my recent emails"],
+                    ["Send an email to test@example.com with subject 'Hello' and body 'This is a test'."],
+                    ["Create a Google Calendar event for tomorrow at 10am titled 'Standup'."],
+                    ["List my upcoming calendar events."],
+                    ["Create a task to 'Buy groceries'."],
+                    ["List my tasks."],
+                    ["Mark the task 'Buy groceries' as complete."],
+                    ["Create a note saying 'Meeting notes: Discuss project alpha'."],
+                    ["List my notes."],
+                    ["Read the note titled 'Meeting notes: Discuss project alpha'."],
+                    ["Search my notes for the word 'project'."],
+                    ["Read my recent emails."],
+                    ["Read the PDF file sample.pdf."],
+                    ["Create a PDF document containing the text 'Hello from Orion'."],
+                    ["Perform OCR on the image sample.jpg."],
+                    ["Read the CSV file data.csv."],
+                    ["Read the Excel file workbook.xlsx."],
+                    ["Read the JSON file config.json."],
+                    ["Convert this markdown to HTML: '# Title\nThis is a test'."],
+                    ["Generate a QR code for the text 'https://example.com'."],
+                    ["Search the web for 'latest artificial intelligence news'."],
+                    ["Fetch the webpage https://example.com and summarize it."],
+                    ["Search Wikipedia for 'Python (programming language)'."],
+                    ["Define the word 'serendipity'."],
+                    ["Give me synonyms for 'happy'."],
+                    ["Translate 'hello' into Spanish."],
+                    ["Search YouTube for 'python tutorial'."],
+                    ["Get the transcript of the YouTube video https://www.youtube.com/watch?v=dQw4w9WgXcQ."],
+                    ["Get information about the YouTube video with ID dQw4w9WgXcQ."],
+                    ["Transcribe this audio file sample.mp3."],
+                    ["List my GitHub repositories."],
+                    ["Search GitHub for repositories about 'langchain'."],
+                    ["List issues in the repository copilot/orion."],
+                    ["Create a GitHub issue in copilot/orion titled 'Test issue' with body 'This is a test'."],
+                    ["Execute python code: print('Hello from Python')"],
+                    ["Check PNR status 1234567890."],
+                    ["Get current train status for train 12345."],
+                    ["Search trains from Delhi to Mumbai tomorrow."],
+                    ["Get station code for New Delhi."],
+                    ["Get flight status for AI101."],
+                    ["Find flights from New York to London on 2026-04-01."],
+                    ["Get airport information for JFK."],
+                    ["Track flight live for AI101."],
+                    ["Take a screenshot."],
+                    ["Send a push notification with message 'Test notification'."],
+                    ["Get system information."],
+                    ["List the directory contents of sandbox."],
+                    ["Read the file sandbox/test_note.md."],
+                    ["Write a file sandbox/hello.txt with content 'Hello world'."],
+                    ["Browse to https://example.com and take a screenshot."],
+                    ["Click the element with id 'login' on the current page."],
                 ],
                 inputs=[msg],
                 label="",
             )
 
     # ── Event Wiring ──
-    send_args = dict(fn=chat, inputs=[msg, chatbot, criteria], outputs=[chatbot, stats_bar])
+    send_args = dict(fn=chat, inputs=[msg, chatbot, criteria, upload_files], outputs=[chatbot, stats_bar])
     msg.submit(**send_args).then(lambda: "", outputs=[msg])
     send_btn.click(**send_args).then(lambda: "", outputs=[msg])
     reset_btn.click(reset_session, outputs=[chatbot, msg, stats_bar])

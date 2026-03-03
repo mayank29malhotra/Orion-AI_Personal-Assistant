@@ -273,7 +273,24 @@ class Orion:
             for tool in research_tools:
                 if tool not in focused_tools:
                     focused_tools.append(tool)
-        
+
+        # Always make sure some generic media utilities are available regardless of category
+        # (markdown/html conversion, QR code generation, YouTube search/transcript)
+        generic_names = [
+            "markdown_to_html",
+            "generate_qr_code",
+            # add common research/media tools even if misclassified
+            "search_youtube",
+            "get_youtube_transcript",
+            "get_youtube_video_info",
+            "web_search",
+            "wikipedia_search",
+            "browser_search",
+        ]
+        for t in self.tools:
+            if t.name in generic_names and t not in focused_tools:
+                focused_tools.append(t)
+
         # If somehow we ended up with very few tools, fall back to all
         if len(focused_tools) < 3:
             return list(self.tools)
