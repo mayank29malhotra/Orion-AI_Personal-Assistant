@@ -44,7 +44,12 @@ def github_list_repos(username: Optional[str] = None) -> str:
             url = "https://api.github.com/user/repos"
         
         response = httpx.get(url, headers=_get_headers(), timeout=30)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as he:
+            if he.response.status_code == 401:
+                return "❌ GitHub authentication failed (401 Unauthorized). Check your GITHUB_TOKEN environment variable."
+            raise
         repos = response.json()
         
         if not repos:
@@ -88,7 +93,12 @@ def github_list_issues(repo: str, state: str = "open") -> str:
             params={"state": state, "per_page": 20},
             timeout=30
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as he:
+            if he.response.status_code == 401:
+                return "❌ GitHub authentication failed (401 Unauthorized). Check your GITHUB_TOKEN."
+            raise
         issues = response.json()
         
         if not issues:
@@ -134,7 +144,12 @@ def github_create_issue(repo: str, title: str, body: str = "", labels: str = "")
             data["labels"] = [l.strip() for l in labels.split(",")]
         
         response = httpx.post(url, headers=_get_headers(), json=data, timeout=30)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as he:
+            if he.response.status_code == 401:
+                return "❌ GitHub authentication failed (401 Unauthorized). Check your GITHUB_TOKEN."
+            raise
         issue = response.json()
         
         logger.info(f"GitHub: Created issue #{issue['number']} in {repo}")
@@ -160,7 +175,12 @@ def github_get_repo_info(repo: str) -> str:
         
         url = f"https://api.github.com/repos/{repo}"
         response = httpx.get(url, headers=_get_headers(), timeout=30)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as he:
+            if he.response.status_code == 401:
+                return "❌ GitHub authentication failed (401 Unauthorized). Check your GITHUB_TOKEN."
+            raise
         r = response.json()
         
         output = [

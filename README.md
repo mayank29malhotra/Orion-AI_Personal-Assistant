@@ -59,6 +59,10 @@ An advanced AI-powered personal assistant with **60 tools** across **9 intellige
 - OAuth2 authentication for secure access
 
 #### ✅ Task & Reminder Management
+
+> **New:** tasks and notes support attachments, and tasks with a due date now automatically create a calendar event for reminders (30/15/5 min alerts via proactive module).
+
+#### ✅ Task & Reminder Management
 - **Create Tasks**: Add tasks with due dates and priorities
 - **List Tasks**: View pending and completed tasks
 - **Complete Tasks**: Mark tasks as done

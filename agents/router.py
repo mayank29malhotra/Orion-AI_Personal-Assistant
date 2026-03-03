@@ -114,7 +114,9 @@ AGENT_KEYWORDS = {
         "audio", "transcribe", "speech", "voice", "recording",
         "pdf", "document", "doc", "ocr", "scan", "image text",
         "excel", "csv", "spreadsheet", "json", "data",
-        "qr", "qr code", "markdown",
+        # conversion/markup keywords
+        "markdown", "html", "convert", "qr", "qr code",
+        "attachment", "file",
     ],
     AgentCategory.RESEARCH: [
         "search", "google", "find", "look up", "lookup",
@@ -310,7 +312,12 @@ def classify_intent_keywords(query: str) -> Tuple[AgentCategory, float]:
         Tuple of (AgentCategory, confidence_score)
     """
     query_lower = query.lower()
-    
+
+    # Quick rules for obvious media operations (markdown/html/qr conversion etc.)
+    if "markdown" in query_lower or "html" in query_lower or "qr" in query_lower:
+        # treat as media intent to ensure conversion tools are available
+        return AgentCategory.MEDIA, 0.9
+
     # Count keyword matches for each category
     scores = {cat: 0 for cat in AgentCategory}
     

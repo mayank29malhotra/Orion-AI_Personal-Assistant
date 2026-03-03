@@ -8,7 +8,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
+
     steps:
     - name: Deploy to Oracle VM
       uses: appleboy/ssh-action@master
@@ -16,23 +17,88 @@ jobs:
         host: ${{ secrets.ORACLE_VM_IP }}
         username: opc
         key: ${{ secrets.ORACLE_SSH_KEY }}
+        command_timeout: 25m
         script: |
-          cd ~/Orion-AI_Personal-Assistant
-          
-          # Pull latest code
-          git pull origin main
-          
-          # Rebuild container (data is in external volume - preserved)
-          podman stop orion || true
-          podman rm orion || true
-          podman build -t orion .
-          
-          # Restart headless (no port needed - Telegram/Email only)
+          set -e
+          echo "=========================================="
+          echo "  Orion Deploy — $(date)"
+          echo "=========================================="
+
+          # ------------------------------------------------
+          # 1. Ensure swap exists (needed for 1GB RAM VMs)
+          # ------------------------------------------------
+          if [ ! -f /swapfile ]; then
+            echo "📦 Creating 2GB swap file..."
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            # Persist across reboots
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+          else
+            sudo swapon /swapfile 2>/dev/null || true
+          fi
+          echo "Swap status:"; free -h | grep -i swap
+
+          # ------------------------------------------------
+          # 2. Stop & remove old container + images
+          # ------------------------------------------------
+          echo "🧹 Cleaning old deployment..."
+          podman stop orion 2>/dev/null || true
+          podman rm   orion 2>/dev/null || true
+          podman rmi  orion 2>/dev/null || true
+          # Prune dangling images to reclaim disk
+          podman image prune -f 2>/dev/null || true
+
+          # ------------------------------------------------
+          # 3. Wipe old code & clone fresh
+          # ------------------------------------------------
+          DEPLOY_DIR=~/Orion-AI_Personal-Assistant
+
+          # Preserve data volume & .env outside the code dir
+          mkdir -p ~/orion-data
+          [ -d "$DEPLOY_DIR/data" ] && cp -a "$DEPLOY_DIR/data/." ~/orion-data/ 2>/dev/null || true
+          [ -f "$DEPLOY_DIR/.env" ] && cp "$DEPLOY_DIR/.env" ~/orion-env-backup 2>/dev/null || true
+
+          rm -rf "$DEPLOY_DIR"
+          git clone --depth 1 https://github.com/${{ github.repository }}.git "$DEPLOY_DIR"
+          cd "$DEPLOY_DIR"
+
+          # Restore .env and data
+          [ -f ~/orion-env-backup ] && cp ~/orion-env-backup .env
+          cp -a ~/orion-data/. data/ 2>/dev/null || true
+
+          # ------------------------------------------------
+          # 4. Build container (multi-stage, no browser)
+          # ------------------------------------------------
+          echo "🔨 Building container..."
+          podman build \
+            --build-arg INSTALL_BROWSER=0 \
+            --jobs 1 \
+            -t orion .
+
+          # ------------------------------------------------
+          # 5. Run with memory limits
+          # ------------------------------------------------
+          echo "🚀 Starting Orion..."
           podman run -d --name orion \
             --env-file .env \
             -v $(pwd)/data:/app/data:Z \
+            --memory=900m \
+            --memory-swap=2g \
             --restart=always \
             orion
-          
+
+          # ------------------------------------------------
+          # 6. Verify
+          # ------------------------------------------------
+          sleep 5
+          echo "=========================================="
+          echo "  Container status:"
+          podman ps --filter name=orion --format "table {{.Names}} {{.Status}} {{.Ports}}"
+          echo ""
+          echo "  Recent logs:"
+          podman logs --tail 20 orion
+          echo ""
           echo "✅ Deployed successfully at $(date)"
-          podman ps
+          echo "=========================================="
