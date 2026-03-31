@@ -69,9 +69,9 @@ ENV PYTHONUNBUFFERED=1
 ENV ORION_DATA_DIR=/app/data
 ENV SKIP_BROWSER_TOOLS=false
 
-# Health-check: ensure the Python process is alive
-HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
-    CMD python -c "print('ok')" || exit 1
+# Health-check: verify the Python process is alive (lightweight check for low-RAM VMs)
+HEALTHCHECK --interval=120s --timeout=30s --start-period=60s --retries=3 \
+    CMD pgrep -f "app_headless" > /dev/null || exit 1
 
 # Run headless mode (Telegram + Email + Scheduler)
 CMD ["python", "app_headless.py"]

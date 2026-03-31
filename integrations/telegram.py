@@ -486,8 +486,21 @@ async def telegram_webhook(req: Request):
             return {"ok": True}
         
         text = message_data.get("text", "")
+        
+        # Handle voice messages
+        if not text and ("voice" in message_data or "audio" in message_data):
+            voice_data = message_data.get("voice") or message_data.get("audio")
+            file_id = voice_data.get("file_id") if voice_data else None
+            if file_id:
+                await send_telegram_message(chat_id, "🎤 *Transcribing voice message...*")
+                text = await transcribe_voice_message(file_id)
+                if text.startswith("[Voice message"):
+                    await send_telegram_message(chat_id, f"❌ {text}")
+                    return {"ok": True}
+                logger.info(f"Voice transcription (webhook): {text[:50]}...")
+        
         if not text:
-            await send_telegram_message(chat_id, "Please send a text message.")
+            await send_telegram_message(chat_id, "Please send a text or voice message.")
             return {"ok": True}
         
         logger.info(f"Received message from {user_id}: {text[:50]}...")

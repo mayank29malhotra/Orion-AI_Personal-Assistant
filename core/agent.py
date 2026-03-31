@@ -150,7 +150,13 @@ class Orion:
         
         # Get proxy settings from environment if available
         https_proxy = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
-        
+
+
+        # What this means:
+        # SSL verification is completely disabled
+        # Why someone would do this:
+        # Avoid certificate issues
+        # Work behind intercepting proxies
         # Create HTTP client with SSL verification completely disabled
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
@@ -163,6 +169,7 @@ class Orion:
             follow_redirects=False,
             proxy=https_proxy
         )
+
         async_http_client = httpx.AsyncClient(
             verify=False, 
             timeout=60.0,
@@ -723,6 +730,8 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
         
         self.last_llm_call = time.time()
 
+
+ 
     async def run_superstep(
         self,
         message: str,

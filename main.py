@@ -74,13 +74,49 @@ Examples:
 
 
 def run_telegram(args):
-    """Start Telegram bot server."""
+    """Start Telegram bot server with Email bot and Scheduler in background."""
+    import threading
     from integrations.telegram import start_telegram_server, set_webhook
     
     if args.set_webhook:
         asyncio.run(set_webhook(args.set_webhook))
+        return
+    
+    # Start Email bot in background thread
+    email_address = os.getenv("EMAIL_ADDRESS")
+    email_password = os.getenv("EMAIL_PASSWORD")
+    if email_address and email_password:
+        def _run_email_bot():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                from integrations.email_bot import email_bot_loop
+                loop.run_until_complete(email_bot_loop())
+            except Exception as e:
+                print(f"❌ Email bot error: {e}")
+        
+        email_thread = threading.Thread(target=_run_email_bot, daemon=True)
+        email_thread.start()
+        print("📬 Email bot started in background")
     else:
-        start_telegram_server(args.host, args.port)
+        print("⚠️ Email bot not configured (EMAIL_ADDRESS/EMAIL_PASSWORD missing)")
+    
+    # Start Scheduler in background thread
+    def _run_scheduler():
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            from integrations.scheduler import start_scheduler_loop
+            loop.run_until_complete(start_scheduler_loop())
+        except Exception as e:
+            print(f"❌ Scheduler error: {e}")
+    
+    scheduler_thread = threading.Thread(target=_run_scheduler, daemon=True)
+    scheduler_thread.start()
+    print("⏰ Scheduler started in background")
+    
+    # Start Telegram server (blocking)
+    start_telegram_server(args.host, args.port)
 
 
 def run_gradio(args):

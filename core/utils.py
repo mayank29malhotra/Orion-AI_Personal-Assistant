@@ -68,7 +68,7 @@ class Logger:
         # Structured JSON logger (separate logger to avoid duplicate console output)
         self._structured_logger = logging.getLogger("Orion.structured")
         self._structured_logger.setLevel(logging.DEBUG)
-        self._structured_logger.propagate = False  # Don't bubble up to parent "Orion" logger
+        self._structured_logger.propagate = False  # Don't send messages to parent "Orion" logger
         
         try:
             json_handler = logging.FileHandler('orion_structured.log', encoding='utf-8')
@@ -101,10 +101,10 @@ class Logger:
     
     def error(self, message: str, exc_info=None, **context):
         if exc_info:
-            self.logger.error(message, exc_info=True)
+            self.logger.error(message, exc_info=True) # detailed human-readable log with stack trace
         else:
-            self.logger.error(message)
-        self._emit_json("ERROR", message, context)
+            self.logger.error(message)  # only msg in human-readable log
+        self._emit_json("ERROR", message, context) # always emit structured log for errors, even if context is empty
     
     def warning(self, message: str, **context):
         self.logger.warning(message)
@@ -200,7 +200,7 @@ class RateLimiter:
         ]
         return max(0, self.max_calls - len(self.calls[key]))
 
-
+#study
 class CircuitBreaker:
     """Circuit breaker for external service calls.
     
@@ -300,28 +300,32 @@ cache = Cache(ttl_seconds=300)
 rate_limiter = RateLimiter(max_calls=60, period=60)
 
 
-def retry_on_error(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0):
-    """Decorator for retrying functions on error."""
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
+def retry_on_error(max_retries=3, delay=1.0, backoff=2.0):
+    def decorator(func):
         def wrapper(*args, **kwargs):
             retries = 0
             current_delay = delay
-            
+
             while retries < max_retries:
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
                     retries += 1
-                    if retries >= max_retries:
-                        logger.error(f"Function {func.__name__} failed after {max_retries} retries: {str(e)}")
+
+                    if retries == max_retries:
+                        logger.error(
+                            f"{func.__name__} failed after {max_retries} retries: {e}"
+                        )
                         raise
-                    
-                    logger.warning(f"Function {func.__name__} failed (attempt {retries}/{max_retries}): {str(e)}. Retrying in {current_delay}s...")
+
+                    logger.warning(
+                        f"{func.__name__} failed ({retries}/{max_retries}). "
+                        f"Retrying in {current_delay}s..."
+                    )
+
                     time.sleep(current_delay)
                     current_delay *= backoff
-            
-            return None
+
         return wrapper
     return decorator
 
