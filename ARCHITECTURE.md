@@ -22,8 +22,9 @@
 13. [Input Validation](#input-validation)
 14. [Config Validation](#config-validation)
 15. [Graceful Shutdown](#graceful-shutdown)
-16. [Test Suite](#test-suite)
-17. [Scaling Decision Matrix](#scaling-decision-matrix)
+16. [Optional Redis Backend (Phase 6)](#optional-redis-backend-phase-6)
+17. [Test Suite](#test-suite)
+18. [Scaling Decision Matrix](#scaling-decision-matrix)
 
 ---
 
@@ -58,7 +59,7 @@ User Message
        ▼                    ▼
 ┌──────────────┐   ┌──────────────────┐
 │ Focused LLM  │   │ Full LLM         │
-│ 8-15 tools   │   │ All 60 tools     │
+│ 8-15 tools   │   │ All 82 tools     │
 │ (category +  │   │                  │
 │  research    │   │ Ensures no       │
 │  fallback)   │   │ capability lost  │
@@ -81,7 +82,7 @@ User Message
 | LLM router using `llama-3.1-8b-instant` | Understands natural language context — catches queries keywords miss (e.g., "Check PNR status"). 14,400 RPD free tier = separate quota from the worker model. |
 | Separate model from worker | Router uses `llama-3.1-8b` (14.4K RPD), worker uses `llama-4-scout` (1K RPD). No quota conflict. |
 | Keyword fallback on LLM failure | If Groq API is down, rate-limited, or slow — keyword classification fires automatically. Zero downtime. |
-| Router is an optimization, NOT a gate | Low-confidence queries get all 60 tools. Nothing is ever blocked. |
+| Router is an optimization, NOT a gate | Low-confidence queries get all 82 tools. Nothing is ever blocked. |
 | Research tools always included | Every focused set includes `web_search`, `wikipedia_search`, etc. The LLM always has a search escape hatch. |
 | Same evaluator loop for both paths | The LangGraph worker→tools→evaluator loop is unchanged. Router only affects which tools the worker sees. |
 | Tool index built once at startup | `_build_tool_index()` runs during `Orion.setup()`. No per-query overhead. |
@@ -95,7 +96,7 @@ User Message
 
 ```
 agents/router.py          ← Intent classification engine
-  ├── AgentCategory        (Enum: 9 categories)
+  ├── AgentCategory        (Enum: 10 categories)
   ├── AGENT_KEYWORDS       (Dict: category → keyword list — fallback only)
   ├── TOOL_CATEGORIES      (Dict: tool_name → category)
   ├── RouterClassification (Pydantic: category + confidence + reasoning)
@@ -155,7 +156,7 @@ integrations/telegram.py  ← Telegram bot + HTTP endpoints
 │ worker_llm_with_tools: ChatOpenAI   # Bound to ALL tools           │
 │ router_llm: ChatOpenAI              # llama-3.1-8b-instant         │
 │                                       + RouterClassification       │
-│ tools: List[BaseTool]               # All 60 tools                 │
+│ tools: List[BaseTool]               # All 82 tools                 │
 │ _tool_index: Dict[AgentCat, List[BaseTool]]                        │
 │                                                                     │
 │ # Phase 2: Reliability                                              │
@@ -172,6 +173,10 @@ integrations/telegram.py  ← Telegram bot + HTTP endpoints
 │ _shutting_down: bool                # Reject new requests flag     │
 │ _in_flight_requests: int            # Active request counter       │
 │ _in_flight_lock: threading.Lock     # Thread-safe counter access   │
+│                                                                     │
+│ # Phase 6: Optional Redis backend                                   │
+│ redis: Optional[redis.Redis]        # None unless REDIS_ENABLED    │
+│ checkpointer_backend: str           # "redis" | "memory"           │
 ├────────────────────────────────────────────────────────────────────┤
 │ setup()                                                             │
 │   ├── Config.validate_or_fail()       # Fail fast on bad config    │
@@ -208,7 +213,7 @@ integrations/telegram.py  ← Telegram bot + HTTP endpoints
 ┌─────────────────────────────────────────────────────────┐
 │                  agents/router.py                        │
 ├─────────────────────────────────────────────────────────┤
-│ AgentCategory (Enum: 9 categories)                       │
+│ AgentCategory (Enum: 10 categories)                      │
 │ RouterClassification (Pydantic BaseModel)                │
 │   category: str, confidence: float, reasoning: str       │
 ├─────────────────────────────────────────────────────────┤
@@ -230,7 +235,7 @@ Input:  self.tools (60 loaded tool objects)
         TOOL_CATEGORIES (dict: tool_name → AgentCategory)
 
 Process:
-  1. Create empty dict: {category: []} for all 9 AgentCategory values
+  1. Create empty dict: {category: []} for all 10 AgentCategory values
   2. For each (tool_name → category) in TOOL_CATEGORIES:
        If tool_name exists in loaded tools → add to that category's list
   3. Any tool NOT in TOOL_CATEGORIES → add to GENERAL (catch-all)
@@ -332,8 +337,8 @@ should_delegate = confidence > 0.5 and category != GENERAL
 ```
 
 - **confidence > 0.5**: LLM is at least moderately sure → route to focused tools
-- **confidence ≤ 0.5**: Ambiguous → fall back to all 60 tools (safe)
-- **GENERAL**: Greetings, chitchat → always all 60 tools
+- **confidence ≤ 0.5**: Ambiguous → fall back to all 82 tools (safe)
+- **GENERAL**: Greetings, chitchat → always all 82 tools
 
 ### Fallback: Keyword-Based Classification
 
@@ -386,7 +391,7 @@ BROWSER           7    navigate_browser, click_element, get_elements,
                        fill_text (loaded via Playwright, 0 if skipped)
 GENERAL           2    read_file_content, write_file_content (catch-all)
 ─────────────────────────────────────────────────────────
-TOTAL         60-67    (60 sync + up to 7 Playwright browser tools)
+TOTAL         82-89    (60 native sync + 22 Swiggy MCP + up to 7 Playwright)
 ```
 
 ### What the LLM Receives Per Category
@@ -394,17 +399,18 @@ TOTAL         60-67    (60 sync + up to 7 Playwright browser tools)
 Every focused set = category tools + RESEARCH tools (always included):
 
 ```
-Category        Own Tools  + Research  = Total    Savings vs All 60
+Category        Own Tools  + Research  = Total    Savings vs All 82
 ──────────────────────────────────────────────────────────────────
-TRAVEL             10         +8         18        70% fewer tools
-COMMUNICATION       2         +8         10        83% fewer tools
-PRODUCTIVITY       12         +8         20        67% fewer tools
-DEVELOPER           7         +8         15        75% fewer tools
-MEDIA              15         +8         23        62% fewer tools
-RESEARCH            8          —          8        87% fewer tools
-SYSTEM              4         +8         12        80% fewer tools
-BROWSER             7         +8         15        75% fewer tools
-GENERAL          (all 60)      —         60        0% (full fallback)
+TRAVEL             10         +8         18        78% fewer tools
+COMMUNICATION       2         +8         10        88% fewer tools
+PRODUCTIVITY       12         +8         20        76% fewer tools
+DEVELOPER           7         +8         15        82% fewer tools
+MEDIA              15         +8         23        72% fewer tools
+RESEARCH            8          —          8        90% fewer tools
+SYSTEM              4         +8         12        85% fewer tools
+BROWSER             7         +8         15        82% fewer tools
+FOOD               22         +8         30        63% fewer tools
+GENERAL          (all 82)      —         82        0% (full fallback)
 ```
 
 ### Token Usage
@@ -414,7 +420,7 @@ Each tool schema is roughly 50-100 tokens for the LLM to parse. With focused too
 - **TRAVEL**: ~900-1800 tokens (18 tools)
 - **COMMUNICATION**: ~500-1000 tokens (10 tools)
 - **BROWSER**: ~750-1500 tokens (15 tools)
-- **Full fallback (GENERAL)**: ~3000-6000 tokens (all 60 tools)
+- **Full fallback (GENERAL)**: ~4000-8000 tokens (all 82 tools)
 
 Focused selection reduces tool-description token usage by 60-87% per query, resulting in **faster responses** and **lower cost per query**.
 
@@ -519,14 +525,14 @@ Layer 1: LLM → Keyword Fallback
       Zero downtime, automatic, no user-visible error
 
 Layer 2: Confidence Threshold
-  └── confidence ≤ 0.5 → ALL 60 tools (no routing)
+  └── confidence ≤ 0.5 → ALL 82 tools (no routing)
 
 Layer 3: Research Fallback Injection  
   └── Every focused set includes web_search, wikipedia_search, etc.
       The LLM can always "escape" to a web search if its tools don't cover the query.
 
 Layer 4: Minimum Tool Count
-  └── If _get_tools_for_category returns < 3 tools → ALL 60 tools
+  └── If _get_tools_for_category returns < 3 tools → ALL 82 tools
       Prevents edge cases where a category has 0 mapped tools (e.g., BROWSER when disabled).
 ```
 
@@ -534,13 +540,13 @@ Layer 4: Minimum Tool Count
 
 | Scenario | Reason | What Happens |
 |----------|--------|--------------|
-| "Hello!" | No keywords match | GENERAL → all 60 tools |
-| "Check PNR" | 1 keyword, score < 2 | GENERAL → all 60 tools |
-| "Book a flight and send email" | TRAVEL=3, COMM=3, confidence=0.5 | GENERAL → all 60 tools |
-| "What's the weather?" | RESEARCH keywords but "weather" isn't one | GENERAL → all 60 tools |
-| First-time category with no tools | < 3 focused tools | Falls back to all 60 |
+| "Hello!" | No keywords match | GENERAL → all 82 tools |
+| "Check PNR" | 1 keyword, score < 2 | GENERAL → all 82 tools |
+| "Book a flight and send email" | TRAVEL=3, COMM=3, confidence=0.5 | GENERAL → all 82 tools |
+| "What's the weather?" | RESEARCH keywords but "weather" isn't one | GENERAL → all 82 tools |
+| First-time category with no tools | < 3 focused tools | Falls back to all 82 |
 
-In all these cases, Orion uses the full 60-tool set. The router is an optimization, not a gate — **zero capability loss** on ambiguous queries.
+In all these cases, Orion uses the full 82-tool set. The router is an optimization, not a gate — **zero capability loss** on ambiguous queries.
 
 ---
 
@@ -899,19 +905,233 @@ finally:
 
 ---
 
+## Optional Redis Backend (Phase 6)
+
+> Phase 6 introduces an **opt-in** Redis layer. With `REDIS_ENABLED=false` (default) Orion behaves bit-for-bit identically to pre-6.x. With Redis reachable, three subsystems are upgraded — each with a live in-memory fallback so a Redis blip never reaches the user.
+
+### Scope (Locked)
+
+| Sub-phase | Component | Class | Falls back to |
+|-----------|-----------|-------|---------------|
+| **6.0** | Redis client foundation | `core/redis_client.get_redis_client()` | `None` (disabled / unreachable) |
+| **6.1** | Distributed per-user rate limiter | `core.utils.RedisRateLimiter` | `core.utils.RateLimiter` (in-process) |
+| **6.2** | Distributed LangGraph checkpoints | `langgraph.checkpoint.redis.RedisSaver` | `langgraph.checkpoint.memory.MemorySaver` |
+| **6.3** | Distributed search cache | `core.utils.RedisCache` | `core.utils.Cache` (in-process) |
+
+### Architectural Contract
+
+```
+                ┌──────────────────────────────────────────┐
+                │ Orion.setup()                            │
+                │  self.redis = get_redis_client()         │
+                │  └── None | redis.Redis (PINGed once)    │
+                └──────────────────┬───────────────────────┘
+                                   │
+        ┌──────────────────────────┼──────────────────────────┐
+        ▼                          ▼                          ▼
+┌──────────────────┐    ┌────────────────────┐   ┌─────────────────────┐
+│ user_rate_limiter│    │ self.memory        │   │ tools/search.py     │
+│  RedisRateLimiter│    │  RedisSaver        │   │  RedisCache singleton│
+│  ↓ on error      │    │  ↓ on error        │   │  ↓ on error         │
+│  RateLimiter     │    │  MemorySaver       │   │  Cache              │
+└──────────────────┘    └────────────────────┘   └─────────────────────┘
+```
+
+**Two invariants apply to every Redis-backed component (Decisions 22, 23, 26, 27):**
+1. **Optional infra** — missing/broken Redis = warning, never fatal. `validate_or_fail()` does not raise on Redis issues; `/health` does NOT report degraded when Redis is unreachable.
+2. **Dual-mode at runtime** — every Redis call is wrapped in try/except and delegates to a live in-memory fallback on any exception. A `*_fallback` structured-log event is emitted, and `backend_name` reflects the backend used by the most recent operation.
+
+### 6.0 — Redis Foundation (`core/redis_client.py`)
+
+```
+get_redis_client() → redis.Redis | None
+  · honours REDIS_ENABLED, REDIS_URL, REDIS_NAMESPACE, REDIS_SOCKET_TIMEOUT
+  · single PING at construction; cached (5s TTL) afterwards via is_available()
+  · returns None when disabled, URL empty, or PING fails
+  · decode_responses=True (everything is str)
+
+get_status() → {enabled, connected, mode, latency_ms}
+  · consumed by /health (non-degrading) and /metrics
+
+reset_redis_client(client) → test injection helper (used by fakeredis)
+```
+
+### 6.1 — Distributed Rate Limiter
+
+```
+RedisRateLimiter(redis_client, max_calls=10, period=60, namespace="orion", fallback=RateLimiter(...))
+  · check(key)    → INCR rate:{ns}:{key}; if first hit, EXPIRE period
+  · wait_time(k)  → clamped TTL of the key
+  · remaining(k)  → max_calls - GET counter
+  · backend_name  → "redis" | "local" (last-used backend)
+
+run_superstep() call site is unchanged. The 20-thread atomicity test
+(test_phase6_ratelimiter.py) confirms exactly N requests pass against
+a shared key.
+```
+
+Observability: `/metrics` → `orion.rate_limiter.{backend, max_calls, period_s}`; the `rate_limit_hit` structured-log event includes `backend=...`.
+
+### 6.2 — Distributed Checkpoints
+
+```
+Orion.setup():
+  if self.redis is not None:
+      try:
+          saver = RedisSaver(redis_client=self.redis)
+          saver.setup()                    # idempotent — creates RediSearch indexes
+          self.memory = saver
+          self.checkpointer_backend = "redis"
+      except Exception:                    # most often: server lacks RediSearch module
+          self.memory = MemorySaver()
+          self.checkpointer_backend = "memory"
+          logger.warning("checkpointer_fallback", ...)
+  else:
+      self.memory = MemorySaver()
+      self.checkpointer_backend = "memory"
+```
+
+`build_graph()` and node logic are agnostic — both savers implement the same `BaseCheckpointSaver` contract. Thread isolation is unchanged: `thread_id = f"{user_id}_{channel}"`. With Redis Stack, threads survive process restarts and any Orion instance can resume any user's thread.
+
+> **Important constraint**: `RedisSaver` requires the **RediSearch** module (Redis Stack). `fakeredis` does **not** implement `FT.*` commands, so end-to-end persistence is verified manually against a real `redis-stack` server. Phase 6.2 unit tests mock `RedisSaver` to validate wiring, the fallback path, and observability surfaces without depending on a live Redis Stack.
+
+### 6.3 — Distributed Search Cache
+
+```
+tools/search.py:
+  _get_search_cache() → RedisCache | Cache | <disabled-sentinel>
+                       (lazy module-level singleton)
+
+  web_search(q):
+      key = _make_cache_key("web_search", q)
+      hit = cache.get(key)
+      if hit: return hit
+      result = httpx.post(serper, ...).json()
+      cache.set(key, format(result), ttl=SEARCH_CACHE_TTL_SECONDS)
+      return formatted
+
+  wikipedia_search(q): same pattern
+```
+
+- **Storage**: `SET cache:{ns}:{sha1[:16]} <payload> EX <ttl>` — strings stored raw, non-strings JSON-encoded.
+- **Errors are NOT cached**, only successful responses.
+- **Disabled mode** (`SEARCH_CACHE_ENABLED=false`) returns a sentinel cache that the tool code skips entirely — bit-for-bit identical to pre-6.3 (mocked test asserts 2 API calls, not 1).
+- **Observability**: `/metrics` → `orion.search_cache.{backend, hits, misses, sets, size, hit_rate}`. `Cache` and `RedisCache` both implement `get_stats()` so the surface is identical regardless of backend.
+
+### Configuration Reference
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `REDIS_ENABLED` | `false` | Master switch for the optional Redis layer |
+| `REDIS_URL` | (empty) | e.g. `redis://localhost:6379/0` |
+| `REDIS_NAMESPACE` | `orion` | Key prefix for shared Redis instances |
+| `REDIS_SOCKET_TIMEOUT` | `2.0` | Per-op timeout in seconds |
+| `SEARCH_CACHE_ENABLED` | `true` | Enable the search cache layer |
+| `SEARCH_CACHE_TTL_SECONDS` | `600` | TTL for cached search responses |
+
+### Operational Notes
+
+- **Behavior with Redis disabled**: identical to pre-6.x. All four sub-phases short-circuit to their in-memory paths.
+- **Behavior with bad Redis URL**: Orion logs a warning at startup, sets `self.redis = None`, and runs in local-only mode. Startup is never blocked.
+- **Behavior with mid-process Redis outage**: per-call try/except catches the exception, delegates to the local fallback, and emits a `*_fallback` log event. The user-facing call path is never broken.
+- **For full distributed mode** (durable checkpoints + cross-instance shared cache + cross-instance rate limit): use **Redis Stack** (or a Redis with the RediSearch module). Plain Redis works for 6.1 and 6.3 but Phase 6.2 will fall back to `MemorySaver`.
+
+---
+
+## FOOD Domain — Swiggy MCP (Phase 8)
+
+> Phase 8 introduces a **10th category** (`FOOD`) and an integration with [Swiggy Builders Club](https://mcp.swiggy.com/builders/) — two Model Context Protocol servers (Food + Dineout) exposing 22 commerce tools. The agent uses these to **find and order food** and to **book tables at favourite restaurants** through Swiggy. Tools load whenever `SWIGGY_ACCESS_TOKEN` is set in the environment (same model as `GITHUB_TOKEN` for GitHub tools); when the token is absent the loader logs an info message and FOOD-category tools simply don't load.
+>
+> **Out of scope**: Swiggy also publishes an Instamart (grocery) MCP server at `/im`. Orion intentionally does **not** wire it — the FOOD domain covers food ordering and table booking only.
+
+### Why MCP?
+
+Swiggy speaks the standard **Model Context Protocol** over streamable HTTP, with **OAuth 2.1 + PKCE** authentication. Rather than wrapping Swiggy's REST APIs by hand, Orion uses [`langchain-mcp-adapters`](https://github.com/langchain-ai/langchain-mcp-adapters) to load each server's tool catalogue at startup as standard `BaseTool` instances. Schema, descriptions, and agent-guidance prompts come from the upstream server — no drift, no maintenance, automatic uptake of new tools when Swiggy ships them.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Orion (LangGraph worker-evaluator pipeline)             │
+│                                                         │
+│  Router LLM  ──category="food"──►  _get_tools_for_      │
+│                                    category(FOOD)       │
+│                                          │              │
+│                                          ▼              │
+│                              22 prefixed BaseTools      │
+│                              (swiggy_food_*,            │
+│                               swiggy_dineout_*)         │
+└─────────────────────────────────────────────────────────┘
+                                │
+                                │ langchain-mcp-adapters
+                                │ (streamable HTTP, Bearer auth)
+                                ▼
+              ┌──────────────────┬───────────────────────┐
+              │ mcp.swiggy.com/  │ mcp.swiggy.com/       │
+              │ food (14 tools)  │ dineout (8 tools)     │
+              └──────────────────┴───────────────────────┘
+```
+
+### Tool Inventory (22 total)
+
+| Server   | Endpoint                       | Tools | Examples (after auto-prefixing)                                                  |
+|----------|--------------------------------|-------|----------------------------------------------------------------------------------|
+| Food     | `mcp.swiggy.com/food`          | 14    | `swiggy_food_search_restaurants`, `swiggy_food_update_food_cart`, `swiggy_food_place_food_order`, `swiggy_food_track_food_order` |
+| Dineout  | `mcp.swiggy.com/dineout`       | 8     | `swiggy_dineout_search_restaurants_dineout`, `swiggy_dineout_get_available_slots`, `swiggy_dineout_book_table` |
+
+The static catalogue lives in `tools/swiggy.py` (`SWIGGY_FOOD_TOOLS`, `SWIGGY_DINEOUT_TOOLS`) so the router can pre-register tool→category mappings even before the live MCP client connects.
+
+### Key Design Decisions
+
+| Concern | Decision | Rationale |
+|---|---|---|
+| Auth model | Pre-fetched bearer in `SWIGGY_ACCESS_TOKEN` env var | Orion is single-user/personal; running an in-process OAuth callback server adds complexity for no benefit. Power users grab the bearer via `mcp-remote` in Claude Desktop / Cursor and paste into `.env`. |
+| Tool naming | Auto-prefix with `swiggy_<server>_` | Avoids collisions with Orion's core tools (`search_restaurants` already exists for Dineout-vs-Food, `get_addresses`/`report_error`/`update_cart` are duplicated *across* Swiggy servers). Original name preserved on `tool.original_name`. |
+| Failure mode | Soft-fail at every step | `langchain-mcp-adapters` not installed, env disabled, token missing/expired, network down — all return `[]` and log info/warning. FOOD tools simply don't load; rest of Orion runs normally. |
+| Confirmation safety | Honoured at agent layer via system prompt | Swiggy guidance demands explicit user confirmation before `place_food_order` / `checkout` / `book_table`. The worker's master prompt should reproduce the "show cart total + ask 'yes' before mutating" pattern from Swiggy's recipes. |
+| Cart cap | Document the v1 ₹1000 Builders Club cap | Place-order tool will reject ≥₹1000; agent should warn user before they reach the cap. |
+| Refresh tokens | Not yet wired in Swiggy v1.0 | 5-day access token; on 401 the user re-runs auth. Roadmapped for Swiggy v1.1. |
+
+### Code Touchpoints
+
+```
+tools/swiggy.py            ← MCP loader, prefix-rename, static catalogue
+tools/loader.py            ← await get_swiggy_tools() in get_all_tools()
+agents/router.py           ← AgentCategory.FOOD, FOOD keywords, 22 entries in
+                             TOOL_CATEGORIES, FOOD line in ROUTER_SYSTEM_PROMPT
+core/config.py             ← SWIGGY_ACCESS_TOKEN, per-server URLs
+                             & kill switches, validate() warning
+requirements.txt           ← langchain-mcp-adapters>=0.1.0
+```
+
+The graph itself (`core/agent.py`) and the focused-tool selector are unchanged — the new category drops into the existing `_build_tool_index` / `_get_tools_for_category` machinery automatically.
+
+### Operational Notes
+
+- **Behaviour with Swiggy disabled**: identical to pre-Phase-8. The loader is a no-op.
+- **Behaviour with bad token**: per-call 401 → tool returns `{success: false, error: "..."}` — surfaced to the user as a normal tool failure, agent re-asks the user to reconnect Swiggy.
+- **Behaviour with both servers down**: the FOOD category becomes empty; the focused-tool selector still includes research tools (web_search etc.) so the agent can degrade gracefully and tell the user Swiggy is unavailable.
+- **Production access**: Swiggy v1.0 production is whitelist-only. Build locally on `http://localhost`, record a flow video, apply at [/access](https://mcp.swiggy.com/builders/access/).
+
+---
+
 ## Test Suite
 
-**82 automated pytest functions across 4 test files — all passing.**
+**Pytest functions across Phases 1–4 + 6.0–6.3 — all passing in every regression run.**
 
 All tests are in the `tests/` directory:
 
 ```
 tests/
 ├── __init__.py              # Package marker
-├── test_phase1.py           # Router + thread isolation (7 tests)
-├── test_phase2.py           # Circuit breaker + rate limiter + health check (7 tests)
-├── test_phase3.py           # Logging + metrics + latency + correlation IDs (36 tests)
-├── test_phase4.py           # Input validation + config + graceful shutdown (32 tests)
+├── test_phase1.py           # Router + thread isolation
+├── test_phase2.py           # Circuit breaker + rate limiter + health check
+├── test_phase3.py           # Logging + metrics + latency + correlation IDs
+├── test_phase4.py           # Input validation + config + graceful shutdown
+├── test_phase6_foundation.py   # Phase 6.0: Redis client foundation (11)
+├── test_phase6_ratelimiter.py  # Phase 6.1: distributed rate limiter (12)
+├── test_phase6_checkpoints.py  # Phase 6.2: distributed checkpoints (9)
+├── test_phase6_searchcache.py  # Phase 6.3: distributed search cache (13)
 ├── test_setup.py            # Environment & dependency checks
 └── test_local.py            # Interactive/batch Orion testing via CLI
 ```
@@ -919,7 +1139,7 @@ tests/
 ### Running Tests
 
 ```bash
-# Run all 82 tests
+# Full regression suite
 python -m pytest tests/ -v
 
 # Run by phase
@@ -927,6 +1147,10 @@ python -m pytest tests/test_phase1.py -v
 python -m pytest tests/test_phase2.py -v
 python -m pytest tests/test_phase3.py -v
 python -m pytest tests/test_phase4.py -v
+python -m pytest tests/test_phase6_foundation.py -v
+python -m pytest tests/test_phase6_ratelimiter.py -v
+python -m pytest tests/test_phase6_checkpoints.py -v
+python -m pytest tests/test_phase6_searchcache.py -v
 
 # Interactive Orion testing
 python tests/test_local.py -i        # Interactive mode
@@ -944,7 +1168,7 @@ python tests/test_local.py -t "query" # Single query test
 | Keyword Classification (fallback) | 7 queries correctly classify via keyword scoring |
 | Keyword Delegation | High-confidence queries delegate; low-confidence and greetings do not |
 | Orion Import + Init | Orion class initializes with `worker_llm`, `router_llm`, `_tool_index` attributes |
-| Tool Index Building | All 60 tools are indexed; every tool lands in exactly one category |
+| Tool Index Building | All 82 tools are indexed; every tool lands in exactly one category |
 | Focused Tool Selection | TRAVEL gets 18 tools (10+8), which is fewer than 60; research tools always present |
 | Thread Isolation | Different users get different `thread_id`s; same user on different channels gets different threads |
 | LLM Router Classification | 10 queries classified via Groq LLM; if API unreachable, validates keyword fallback resilience (≥8/10) |
@@ -986,6 +1210,15 @@ python tests/test_local.py -t "query" # Single query test
 | In-Flight Tracking | 2 | increment/decrement in run_superstep source, finally block |
 | Lifespan Integration | 1 | telegram.py lifespan calls graceful_shutdown |
 
+#### Phase 6: Optional Redis Backend (45 tests)
+
+| Group | File | Count | What It Validates |
+|-------|------|-------|-------------------|
+| 6.0 Foundation | `test_phase6_foundation.py` | 11 | Config fields, validation warnings (non-fatal), factory paths (disabled / empty URL / unreachable / fakeredis injected), `get_status()` shape, `Orion.redis` attribute, `/health` and `/metrics` include redis block |
+| 6.1 Rate Limiter | `test_phase6_ratelimiter.py` | 12 | `RedisRateLimiter` under/over threshold, TTL reset, 20-thread concurrency atomicity, Redis-error fallback, namespace isolation, `backend_name` property, Orion picks correct backend, `/metrics` exposes backend, backward compat with local `RateLimiter` |
+| 6.2 Checkpoints | `test_phase6_checkpoints.py` | 9 | Default uses `MemorySaver`, `/metrics` exposes `checkpointer`, `RedisSaver` selected when redis available (mocked), failure path falls back to `MemorySaver`, no-swap when redis is None, `/health` declares `checkpointer` field, `thread_id` invariant preserved, `RedisSaver` class importable |
+| 6.3 Search Cache | `test_phase6_searchcache.py` | 13 | In-memory `Cache` stats parity, `RedisCache` round-trip + TTL + JSON encoding + miss path, dual-mode fallback on get/set, `backend_name` flips after Redis error, `web_search` / `wikipedia_search` cache hit avoids 2nd API call, `SEARCH_CACHE_ENABLED=false` short-circuits, `/metrics` exposes `search_cache`, key determinism, namespace isolation |
+
 ---
 
 ## Scaling Decision Matrix
@@ -995,8 +1228,8 @@ python tests/test_local.py -t "query" # Single query test
 | Concern | Current Design (1 user) | Trigger to Change | Migration Path | Why Not Now |
 |---------|------------------------|-------------------|----------------|-------------|
 | **DB Concurrency** | SQLite (WAL mode, single-writer) | >10 concurrent writers causing lock contention | Swap to Postgres + connection pool. Interface is already query-based — no ORM, no schema change | Single-writer lock is zero-contention at scale=1. Postgres adds connection management overhead with no benefit |
-| **Rate Limit State** | In-memory `Dict[str, list]` in `RateLimiter` | Multi-process or multi-node deployment | Redis `INCR` with `EXPIRE` (TTL-based sliding window). Same key format (`user:{id}`) | In-process dict is zero-latency, zero-dependency. Adding Redis requires a running Redis instance |
-| **Session / Checkpoint State** | LangGraph `MemorySaver` (in-memory dict) | Horizontal scaling (multiple Orion instances) | `RedisSaver` or `PostgresSaver` from `langgraph-checkpoint-*`. Drop-in replacements — same `BaseCheckpointSaver` interface | MemorySaver is correct for single-process. Distributed state needs shared storage |
+| **Rate Limit State** | In-memory `Dict[str, list]` in `RateLimiter` | Multi-process or multi-node deployment | **✅ Implemented in Phase 6.1** — `RedisRateLimiter` (atomic `INCR`+`EXPIRE`) auto-selected when `REDIS_ENABLED=true`. In-memory `RateLimiter` remains as live fallback (Decision 23) | In-process dict is zero-latency, zero-dependency at scale=1. Redis path is opt-in |
+| **Session / Checkpoint State** | LangGraph `MemorySaver` (in-memory dict) | Horizontal scaling (multiple Orion instances) | **✅ Implemented in Phase 6.2** — `RedisSaver` from `langgraph-checkpoint-redis` auto-selected when `REDIS_ENABLED=true` and Redis Stack reachable. Falls back to `MemorySaver` otherwise | MemorySaver is correct for single-process. Redis Stack is opt-in for horizontal scale |
 | **Authentication** | Telegram-provided (`chat_id` = user identity) | API gateway / multi-channel without built-in auth | JWT with refresh tokens via FastAPI `Depends()`. Bearer token in `Authorization` header | Redundant when Telegram already authenticates. Adding auth to a personal bot = security theater |
 | **Message Broker** | SQLite `FailedRequestQueue` (retry queue) | >100 messages/sec throughput, or multi-consumer processing | Redis Streams or AWS SQS. Queue interface (`push`, `pop`, `ack`) stays the same | SQLite queue handles personal-assistant load (~5 msg/min). Kafka/SQS minimum overhead ≫ benefit at this scale |
 | **API Key Management** | Single Groq key in `.env` | Multiple users each bringing their own API keys | Encrypted per-user key vault (AWS KMS / HashiCorp Vault), key rotation lifecycle | One user = one key. Key management infra is pure overhead with no user benefit |
@@ -1007,8 +1240,9 @@ python tests/test_local.py -t "query" # Single query test
 The abstractions are built so that scaling is a **backend swap, not an architecture rewrite**:
 
 ```
-RateLimiter(key="user:123")     →  Same interface, swap dict for Redis INCR
-MemorySaver()                   →  Same interface, swap for RedisSaver()
+RateLimiter(key="user:123")     →  Same interface, swap dict for Redis INCR  ✅ done in 6.1
+MemorySaver()                   →  Same interface, swap for RedisSaver()      ✅ done in 6.2
+Cache(ttl=...)                  →  Same interface, swap for RedisCache()      ✅ done in 6.3
 SQLite retry queue              →  Same push/pop interface, swap for Redis Streams
 thread_id = f"{user_id}_{ch}"   →  Already multi-user aware, no change needed
 CircuitBreaker()                →  Already user-agnostic, no change needed

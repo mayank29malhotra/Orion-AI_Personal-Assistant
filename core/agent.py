@@ -31,11 +31,20 @@ import threading
 from datetime import datetime
 
 from core.config import Config
-from core.utils import logger, RateLimiter, CircuitBreaker, async_retry_on_error
+from core.utils import logger, RateLimiter, RedisRateLimiter, CircuitBreaker, async_retry_on_error
 from core.models import ChatRequest
 from agents.router import classify_intent, get_agent_for_query, AgentCategory, TOOL_CATEGORIES, ROUTER_SYSTEM_PROMPT, RouterClassification
 
 load_dotenv(override=True)
+
+
+def _get_search_cache_stats_safe() -> Dict[str, Any]:
+    """Pull search-cache stats for /metrics. Tolerates an unloaded tools module."""
+    try:
+        from tools.search import get_search_cache_stats
+        return get_search_cache_stats()
+    except Exception:
+        return {"backend": "unknown", "hits": 0, "misses": 0, "sets": 0, "size": 0, "hit_rate": 0.0}
 
 
 class State(TypedDict):
@@ -71,13 +80,21 @@ class Orion:
         self.llm_with_tools = None
         self.graph = None
         self.orion_id = str(uuid.uuid4())
-        # Checkpoint storage — currently in-memory via MemorySaver.
-        # Migration path: swap to RedisSaver/PostgresSaver for horizontal scaling.
-        # Same BaseCheckpointSaver interface — zero code changes in graph logic.
+        # Checkpoint storage. Defaults to in-memory MemorySaver.
+        # Phase 6.2: setup() upgrades this to a RedisSaver when self.redis is
+        # available. Both implement BaseCheckpointSaver, so build_graph() and
+        # the rest of the pipeline are agnostic to the chosen backend.
+        # `checkpointer_backend` is exposed via /health and /metrics.
         self.memory = MemorySaver()
+        self.checkpointer_backend = "memory"
         self.browser = None
         self.playwright = None
         self.tool_usage_count = 0
+        
+        # Optional Redis client (Phase 6.0). May be None when REDIS_ENABLED is
+        # false or the URL is unreachable. Every consumer must handle None and
+        # fall back to its in-memory implementation. Populated in setup().
+        self.redis = None
         
         # Router: tool index by category for focused tool selection
         self._tool_index = {}  # {AgentCategory: [tool_objects]}
@@ -98,8 +115,9 @@ class Orion:
         )
         
         # Per-user rate limiter: prevents one noisy user from starving others.
-        # Currently in-memory dict. Migration path: Redis INCR with TTL for
-        # distributed rate limiting across multiple Orion instances.
+        # Default: in-memory dict. Phase 6.1 swaps this to RedisRateLimiter in
+        # `setup()` when `self.redis` is available, with this in-memory limiter
+        # passed in as the live fallback (Decision 23: dual-mode contract).
         self.user_rate_limiter = RateLimiter(
             max_calls=Config.USER_REQUESTS_PER_MINUTE,
             period=60
@@ -141,6 +159,61 @@ class Orion:
         if config_warnings:
             logger.warning(f"Config validation: {len(config_warnings)} warning(s) at startup")
         
+        # --- Phase 6.0: Optional Redis client. None when disabled/unreachable. ---
+        from core.redis_client import get_redis_client, get_status as _redis_status
+        self.redis = get_redis_client()
+        _rstatus = _redis_status()
+        logger.info(f"redis_mode={_rstatus['mode']} connected={_rstatus['connected']}")
+
+        # --- Phase 6.1: Upgrade per-user rate limiter to Redis-backed when available. ---
+        # Same `.check()` / `.wait_time()` interface as RateLimiter, so the call
+        # site in run_superstep() is unchanged. The existing in-memory limiter is
+        # passed in as the live fallback (dual-mode contract).
+        if self.redis is not None:
+            self.user_rate_limiter = RedisRateLimiter(
+                redis_client=self.redis,
+                max_calls=Config.USER_REQUESTS_PER_MINUTE,
+                period=60,
+                namespace=Config.REDIS_NAMESPACE,
+                fallback=self.user_rate_limiter,
+            )
+            logger.info("User rate limiter using Redis backend")
+        else:
+            logger.info("User rate limiter using local in-memory backend")
+
+        # --- Phase 6.2: Distributed checkpoints via RedisSaver (BaseCheckpointSaver). ---
+        # When self.redis is available, swap MemorySaver for RedisSaver so
+        # conversation thread state survives restarts and is shared across
+        # instances. The thread-isolation invariant from Phase 1
+        # (`thread_id = f"{user_id}_{channel}"`) is unchanged. On any failure
+        # (RediSearch not loaded, init error, etc.), fall back to MemorySaver
+        # and log the choice — the request path is never blocked.
+        if self.redis is not None:
+            try:
+                from langgraph.checkpoint.redis import RedisSaver
+                _saver = RedisSaver(redis_client=self.redis)
+                # RedisSaver requires one-time index setup against the server.
+                # Safe to call on every start (idempotent).
+                _saver.setup()
+                self.memory = _saver
+                self.checkpointer_backend = "redis"
+                logger.info("Checkpointer using Redis backend (RedisSaver)",
+                            event="checkpointer_selected", backend="redis")
+            except Exception as e:
+                # Most common cause: server lacks RediSearch module (not Redis Stack).
+                self.memory = MemorySaver()
+                self.checkpointer_backend = "memory"
+                logger.warning(
+                    f"RedisSaver unavailable ({type(e).__name__}: {e}); "
+                    f"falling back to in-memory MemorySaver",
+                    event="checkpointer_fallback",
+                    backend="memory",
+                    error=type(e).__name__,
+                )
+        else:
+            logger.info("Checkpointer using in-memory backend (MemorySaver)",
+                        event="checkpointer_selected", backend="memory")
+
         # Initialize persistent conversation memory
         self.conversation_memory = ConversationMemory()
         logger.info("Persistent memory initialized")
@@ -460,6 +533,22 @@ You have access to 60+ powerful tools across multiple categories:
 - `get_flight_by_route` - Find flights between cities
 - `get_airport_info` - Get airport details, terminals, metro connections
 - `track_flight_live` - Get real-time aircraft position and tracking links
+
+🍔 Food Ordering & Table Booking (Swiggy MCP — only when SWIGGY_ACCESS_TOKEN is set):
+- `swiggy_food_*` - 14 tools for Swiggy Food: search restaurants, browse menus, build cart, apply coupons, place order (COD only, ₹1000 cap), track delivery
+- `swiggy_dineout_*` - 8 tools for Swiggy Dineout: book a table at favorite restaurants — search restaurants, get_available_slots, book_table (free reservations only)
+
+⚠️ SWIGGY SAFETY RULES (apply when calling any swiggy_* tool):
+1. ALWAYS call `swiggy_food_get_addresses` (or `swiggy_dineout_get_saved_locations`) FIRST to resolve the user's delivery / dining location. Stop and ask the user which address to use if multiple are returned.
+2. Only recommend restaurants where `availabilityStatus == "OPEN"` (Food) or status == "AVAILABLE" (Dineout).
+3. Before any MUTATING call (`swiggy_food_place_food_order`, `swiggy_dineout_book_table`):
+   - Call `swiggy_food_get_food_cart` to see the live server-side cart (Food)
+   - Show the user: items + quantities + total + delivery address + payment method (or party-size + slot + restaurant for Dineout)
+   - Wait for explicit "yes" / "confirm" / "place it" before mutating
+4. NEVER auto-place an order. NEVER blind-retry order placement on failure — call `swiggy_food_get_food_orders` / `swiggy_dineout_get_booking_status` first to check whether it actually went through.
+5. If user asks to CANCEL a Swiggy order: do NOT call any tool. Reply: "To cancel your order, please call Swiggy customer care at 080-67466729."
+6. Food cart is per-restaurant — adding from a different restaurant flushes the cart. Warn the user before that happens.
+7. Honour the v1 ₹1000 Builders Club cart cap on Food.
 
 💻 System:
 - `python_repl` - Execute Python code for calculations, data processing
@@ -789,7 +878,8 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
         if user_id and not self.user_rate_limiter.check(f"user:{user_id}"):
             wait = self.user_rate_limiter.wait_time(f"user:{user_id}")
             logger.warning(f"Per-user rate limit hit for {user_id}",
-                           event="rate_limit_hit", user_id=user_id, wait_seconds=int(wait))
+                           event="rate_limit_hit", user_id=user_id, wait_seconds=int(wait),
+                           backend=getattr(self.user_rate_limiter, "backend_name", "local"))
             self._request_metrics["rate_limited"] += 1
             return history + [[message, (
                 f"You're sending requests too quickly. "
@@ -912,10 +1002,17 @@ Overall you should give the Assistant the benefit of the doubt if they say they'
                 "worker_llm": _percentiles(self._worker_latency_samples),
             },
             "circuit_breaker": self.llm_circuit_breaker.get_state(),
+            "rate_limiter": {
+                "backend": getattr(self.user_rate_limiter, "backend_name", "local"),
+                "max_calls": getattr(self.user_rate_limiter, "max_calls", None),
+                "period_s": getattr(self.user_rate_limiter, "period", None),
+            },
+            "checkpointer": getattr(self, "checkpointer_backend", "memory"),
             "tools": {
                 "total_loaded": len(self.tools) if self.tools else 0,
                 "tool_calls_this_session": self.tool_usage_count,
             },
+            "search_cache": _get_search_cache_stats_safe(),
             "shutdown": {
                 "shutting_down": self._shutting_down,
                 "in_flight_requests": self._in_flight_requests,

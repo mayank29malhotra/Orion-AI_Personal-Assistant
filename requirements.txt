@@ -64,3 +64,25 @@ youtube-search-python>=1.6.6
 ## Optional (Windows service support)
 # pywin32>=306
 
+## Optional Redis backend (Phase 6.0+)
+## When REDIS_ENABLED=true and REDIS_URL is reachable, Orion uses Redis for:
+##   - Distributed per-user rate limiting (Phase 6.1)
+##   - LangGraph checkpoint persistence across restarts/instances (Phase 6.2)
+## Falls back gracefully to in-memory implementations when Redis is absent.
+redis>=5.0.0
+
+## Phase 6.2: RedisSaver checkpointer for LangGraph (drop-in BaseCheckpointSaver).
+## Requires a Redis Stack server (RediSearch module) at runtime when enabled.
+## Falls back to MemorySaver when Redis is unavailable or instantiation fails.
+langgraph-checkpoint-redis>=0.4.0
+
+## Test-only: in-process Redis fake used by tests/test_phase6_*.py.
+## Safe to leave installed in production (zero runtime cost).
+fakeredis>=2.20.0
+
+## Phase 8: Swiggy MCP integration (Food, Instamart, Dineout)
+## Optional. When SWIGGY_ENABLED=true + SWIGGY_ACCESS_TOKEN set, Orion connects
+## to Swiggy Builders Club MCP servers over streamable HTTP and exposes 35
+## food/grocery/dineout tools to the LLM. Falls back to disabled gracefully.
+langchain-mcp-adapters>=0.1.0
+

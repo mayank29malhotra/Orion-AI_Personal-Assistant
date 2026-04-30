@@ -77,6 +77,7 @@ class AgentCategory(Enum):
     RESEARCH = "research"
     SYSTEM = "system"
     BROWSER = "browser"
+    FOOD = "food"  # Phase 8 — Swiggy MCP (Food, Dineout)
     GENERAL = "general"  # Handled by main Orion
 
 
@@ -133,6 +134,23 @@ AGENT_KEYWORDS = {
     AgentCategory.BROWSER: [
         "browse", "website", "webpage", "web page", "navigate",
         "click", "scroll", "open website", "go to",
+    ],
+    AgentCategory.FOOD: [
+        # Swiggy brand & products
+        "swiggy", "dineout",
+        # Food delivery
+        "food", "foods", "meal", "meals", "dish", "dishes", "cuisine",
+        "restaurant", "restaurants", "order food", "food delivery", "deliver",
+        "biryani", "pizza", "burger", "thali", "chinese food", "south indian",
+        "north indian", "dessert", "snack", "breakfast", "lunch", "dinner",
+        "hungry", "eat", "craving", "menu",
+        # Cart / ordering verbs
+        "cart", "add to cart", "checkout", "place order", "track order",
+        "coupon", "discount",
+        # Dineout / reservations
+        "book a table", "book table", "table reservation", "reservation",
+        "dine out", "dine-out", "restaurant booking", "favorite restaurant",
+        "favourite restaurant", "fav restaurant",
     ],
 }
 
@@ -229,10 +247,24 @@ TOOL_CATEGORIES = {
     "get_distance": AgentCategory.TRAVEL,
 }
 
+# ----------------------------------------------------------------------------
+# Phase 8 — Swiggy MCP tools (FOOD domain). 22 tools across 2 MCP servers
+# (Food: 14, Dineout: 8). Names are pre-prefixed by the Swiggy loader (`tools/swiggy.py`) so we can
+# pre-register them here even before the live MCP client connects. This lets
+# the router's focused-tool selector route correctly when tokens are present.
+# ----------------------------------------------------------------------------
+try:
+    from tools.swiggy import ALL_SWIGGY_TOOL_NAMES as _ALL_SWIGGY
+except Exception:  # pragma: no cover — defensive import
+    _ALL_SWIGGY = []
+
+for _swiggy_tool in _ALL_SWIGGY:
+    TOOL_CATEGORIES[_swiggy_tool] = AgentCategory.FOOD
+
 
 class RouterClassification(BaseModel):
     """Structured output from the router LLM."""
-    category: str = Field(description="One of: TRAVEL, COMMUNICATION, PRODUCTIVITY, DEVELOPER, MEDIA, RESEARCH, SYSTEM, BROWSER, GENERAL")
+    category: str = Field(description="One of: TRAVEL, COMMUNICATION, PRODUCTIVITY, DEVELOPER, MEDIA, RESEARCH, SYSTEM, BROWSER, FOOD, GENERAL")
     confidence: float = Field(description="Confidence score between 0.0 and 1.0")
     reasoning: str = Field(description="One-sentence explanation for the classification")
 
@@ -253,6 +285,7 @@ Categories:
 - RESEARCH: web search, Wikipedia, dictionary definitions, synonyms/antonyms, translations
 - SYSTEM: screenshots, file/folder management, system info
 - BROWSER: web browsing, navigating websites, clicking elements
+- FOOD: ordering food on Swiggy, table reservations at favorite restaurants on Swiggy Dineout, restaurant search, menu browsing, cart/checkout, order tracking, food coupons (powered by Swiggy MCP)
 - GENERAL: greetings, chitchat, unclear intent, or doesn't fit any above category
 
 Rules:
@@ -414,6 +447,11 @@ def get_agent_for_query(query: str, router_llm=None) -> Dict:
             "name": "BrowserAgent",
             "description": "Handles web browsing and automation",
             "icon": "🌐"
+        },
+        AgentCategory.FOOD: {
+            "name": "FoodAgent",
+            "description": "Handles food ordering on Swiggy and table bookings at favorite restaurants via Swiggy Dineout",
+            "icon": "🍔"
         },
         AgentCategory.GENERAL: {
             "name": "Orion",

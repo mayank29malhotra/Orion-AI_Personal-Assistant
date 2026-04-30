@@ -5,6 +5,7 @@ Web search, Wikipedia, and Python REPL.
 
 import os
 import logging
+import hashlib
 from typing import Optional
 
 from langchain_core.tools import tool
@@ -13,6 +14,88 @@ logger = logging.getLogger("Orion")
 
 # Check for Serper API key
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
+
+
+# ============ Search Cache (Phase 6.3) ============
+# Module-level lazy singleton. RedisCache when Redis is reachable, otherwise
+# in-memory Cache. Disabling SEARCH_CACHE_ENABLED bypasses lookup/store entirely.
+# The cache is read in web_search/wikipedia_search; misses fall through to the
+# real API call and the result is stored on success.
+
+_search_cache = None  # type: ignore
+
+
+def _make_cache_key(tool_name: str, *parts: object) -> str:
+    """Deterministic, length-bounded key for the search cache.
+
+    Hashing the args keeps keys short and avoids issues with whitespace,
+    unicode, or characters that need escaping in Redis keys.
+    """
+    raw = "|".join([tool_name, *[str(p) for p in parts]])
+    digest = hashlib.sha1(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"{tool_name}:{digest}"
+
+
+def _get_search_cache():
+    """Return the active search cache (lazy-initialized)."""
+    global _search_cache
+    if _search_cache is not None:
+        return _search_cache
+
+    try:
+        from core.config import Config
+        from core.utils import Cache, RedisCache
+    except Exception:
+        # Defensive: if core isn't importable for some reason, skip caching.
+        return None
+
+    if not Config.SEARCH_CACHE_ENABLED or Config.SEARCH_CACHE_TTL_SECONDS <= 0:
+        _search_cache = Cache(ttl_seconds=max(Config.SEARCH_CACHE_TTL_SECONDS, 1))
+        # Setting a sentinel attribute so callers can tell caching is off.
+        _search_cache._enabled = False  # type: ignore[attr-defined]
+        return _search_cache
+
+    fallback = Cache(ttl_seconds=Config.SEARCH_CACHE_TTL_SECONDS)
+    fallback._enabled = True  # type: ignore[attr-defined]
+
+    try:
+        from core.redis_client import get_redis_client
+        client = get_redis_client()
+    except Exception as exc:
+        logger.warning(f"Search cache: get_redis_client failed ({exc}); using local cache")
+        client = None
+
+    if client is not None:
+        _search_cache = RedisCache(
+            redis_client=client,
+            ttl_seconds=Config.SEARCH_CACHE_TTL_SECONDS,
+            namespace=f"{Config.REDIS_NAMESPACE}:search",
+            fallback=fallback,
+        )
+        _search_cache._enabled = True  # type: ignore[attr-defined]
+    else:
+        _search_cache = fallback
+
+    return _search_cache
+
+
+def get_search_cache_stats() -> dict:
+    """Return cache stats for /metrics. Always returns a dict (empty when disabled)."""
+    cache = _get_search_cache()
+    if cache is None:
+        return {"backend": "disabled", "hits": 0, "misses": 0, "sets": 0, "size": 0, "hit_rate": 0.0}
+    if hasattr(cache, "get_stats"):
+        stats = cache.get_stats()
+        if not getattr(cache, "_enabled", True):
+            stats["backend"] = "disabled"
+        return stats
+    return {"backend": "unknown", "hits": 0, "misses": 0, "sets": 0, "size": 0, "hit_rate": 0.0}
+
+
+def reset_search_cache():
+    """Test helper: drop the singleton so the next call rebuilds it."""
+    global _search_cache
+    _search_cache = None
 
 
 # ============ WEB SEARCH ============
@@ -28,7 +111,17 @@ def web_search(query: str, num_results: int = 5) -> str:
     """
     if not SERPER_API_KEY:
         return "❌ SERPER_API_KEY not configured. Please set it in your environment variables."
-    
+
+    # --- Phase 6.3: cache lookup before hitting the API ---
+    cache = _get_search_cache()
+    cache_enabled = cache is not None and getattr(cache, "_enabled", True)
+    cache_key = _make_cache_key("web_search", query, num_results) if cache_enabled else None
+    if cache_enabled and cache_key:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            logger.info(f"Search cache HIT: web_search query={query!r}")
+            return cached
+
     try:
         import httpx
         
@@ -53,7 +146,17 @@ def web_search(query: str, num_results: int = 5) -> str:
             output.append("")
         
         logger.info(f"Google search (Serper): {query} ({len(results)} results)")
-        return "\n".join(output)
+        formatted = "\n".join(output)
+
+        # Store on success only (don't cache transient errors).
+        if cache_enabled and cache_key:
+            try:
+                cache.set(cache_key, formatted)
+            except Exception as cache_exc:
+                # Cache failures must never break the user-facing call.
+                logger.warning(f"Search cache set failed: {cache_exc}")
+
+        return formatted
         
     except Exception as e:
         error_msg = f"Web search failed: {str(e)}. Try using browser_search for a fallback."
@@ -174,6 +277,16 @@ def wikipedia_search(query: str, sentences: int = 5) -> str:
         query: Search query
         sentences: Number of sentences in summary (default 5)
     """
+    # --- Phase 6.3: cache lookup before hitting Wikipedia ---
+    cache = _get_search_cache()
+    cache_enabled = cache is not None and getattr(cache, "_enabled", True)
+    cache_key = _make_cache_key("wikipedia_search", query, sentences) if cache_enabled else None
+    if cache_enabled and cache_key:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            logger.info(f"Search cache HIT: wikipedia_search query={query!r}")
+            return cached
+
     try:
         import wikipedia
         
@@ -194,6 +307,14 @@ def wikipedia_search(query: str, sentences: int = 5) -> str:
                 result += f"\n\n📖 Related: {', '.join(search_results[1:])}"
             
             logger.info(f"Wikipedia search: {query}")
+
+            # Store on success only.
+            if cache_enabled and cache_key:
+                try:
+                    cache.set(cache_key, result)
+                except Exception as cache_exc:
+                    logger.warning(f"Search cache set failed: {cache_exc}")
+
             return result
         
         except wikipedia.DisambiguationError as e:

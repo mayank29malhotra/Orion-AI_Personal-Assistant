@@ -126,23 +126,35 @@ logger = Logger()
 
 
 class Cache:
-    """Simple in-memory cache with TTL."""
+    """Simple in-memory cache with TTL.
+
+    Stats counters (`_hits`, `_misses`) and `backend_name` were added in
+    Phase 6.3 to give the in-memory cache parity with `RedisCache` for the
+    `/metrics` surface. Existing callers using only `.get()`/`.set()` are
+    unaffected.
+    """
     
     def __init__(self, ttl_seconds: int = 300):
         self.cache: Dict[str, tuple[Any, float]] = {}
         self.ttl = ttl_seconds
+        self._hits = 0
+        self._misses = 0
+        self._sets = 0
     
     def get(self, key: str) -> Optional[Any]:
         if key in self.cache:
             value, timestamp = self.cache[key]
             if time.time() - timestamp < self.ttl:
+                self._hits += 1
                 return value
             else:
                 del self.cache[key]
+        self._misses += 1
         return None
     
     def set(self, key: str, value: Any):
         self.cache[key] = (value, time.time())
+        self._sets += 1
     
     def delete(self, key: str):
         if key in self.cache:
@@ -153,6 +165,145 @@ class Cache:
     
     def size(self) -> int:
         return len(self.cache)
+
+    @property
+    def backend_name(self) -> str:
+        """Backend identifier for /metrics. In-memory cache always returns 'local'."""
+        return "local"
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Stats dict consumed by /metrics. Mirror of RedisCache.get_stats()."""
+        total = self._hits + self._misses
+        hit_rate = (self._hits / total) if total else 0.0
+        return {
+            "backend": self.backend_name,
+            "hits": self._hits,
+            "misses": self._misses,
+            "sets": self._sets,
+            "size": self.size(),
+            "hit_rate": round(hit_rate, 3),
+        }
+
+
+class RedisCache:
+    """Distributed key-value cache backed by Redis (Phase 6.3).
+
+    Drop-in replacement for ``Cache`` (same ``.get()`` / ``.set()`` interface)
+    used to share idempotent search results across Orion instances and to
+    survive process restarts.
+
+    Storage:
+        SET cache:{namespace}:{key} <json-or-str>  EX <ttl_seconds>
+        GET cache:{namespace}:{key}
+
+    Values are JSON-encoded so any JSON-serializable Python object round-trips.
+    Strings are stored directly (no JSON wrapping) for the common search-tool
+    case where the cached value is already a formatted string.
+
+    Failure handling — dual-mode (Decision 23, generalized to caches):
+        Any Redis exception is caught and the call is delegated to
+        ``self.fallback`` (a live in-memory ``Cache``). The system never raises
+        on a cache lookup. ``backend_name`` reflects the backend used by the
+        most recent ``get()`` so /metrics shows the active mode.
+    """
+
+    def __init__(
+        self,
+        redis_client: Any,
+        ttl_seconds: int = 600,
+        namespace: str = "orion",
+        fallback: Optional["Cache"] = None,
+    ):
+        self.redis = redis_client
+        self.ttl = ttl_seconds
+        self.namespace = namespace
+        self.fallback = fallback if fallback is not None else Cache(ttl_seconds=ttl_seconds)
+        self._hits = 0
+        self._misses = 0
+        self._sets = 0
+        self._errors = 0
+        self._last_backend = "redis"
+
+    def _redis_key(self, key: str) -> str:
+        return f"{self.namespace}:cache:{key}"
+
+    def get(self, key: str) -> Optional[Any]:
+        rkey = self._redis_key(key)
+        try:
+            raw = self.redis.get(rkey)
+            self._last_backend = "redis"
+            if raw is None:
+                self._misses += 1
+                return None
+            self._hits += 1
+            # Try JSON decode; fall back to raw string for non-JSON values.
+            import json as _json
+            try:
+                return _json.loads(raw)
+            except (ValueError, TypeError):
+                return raw
+        except Exception as exc:
+            self._errors += 1
+            self._last_backend = "local"
+            logger.warning(
+                f"RedisCache get falling back to local for key={key}",
+                event="search_cache_fallback",
+                error=f"{type(exc).__name__}: {exc}",
+                op="get",
+            )
+            return self.fallback.get(key)
+
+    def set(self, key: str, value: Any):
+        rkey = self._redis_key(key)
+        try:
+            import json as _json
+            if isinstance(value, str):
+                payload = value
+            else:
+                payload = _json.dumps(value, default=str)
+            # SET with EX is atomic; the key always carries its TTL.
+            self.redis.set(rkey, payload, ex=self.ttl)
+            self._sets += 1
+            self._last_backend = "redis"
+        except Exception as exc:
+            self._errors += 1
+            self._last_backend = "local"
+            logger.warning(
+                f"RedisCache set falling back to local for key={key}",
+                event="search_cache_fallback",
+                error=f"{type(exc).__name__}: {exc}",
+                op="set",
+            )
+            self.fallback.set(key, value)
+
+    def delete(self, key: str):
+        try:
+            self.redis.delete(self._redis_key(key))
+        except Exception:
+            pass
+        self.fallback.delete(key)
+
+    def size(self) -> int:
+        # Best-effort: Redis SCAN would be needed for an exact count; return
+        # the fallback's size which is a reasonable lower bound.
+        return self.fallback.size()
+
+    @property
+    def backend_name(self) -> str:
+        return self._last_backend
+
+    def get_stats(self) -> Dict[str, Any]:
+        total = self._hits + self._misses
+        hit_rate = (self._hits / total) if total else 0.0
+        return {
+            "backend": self.backend_name,
+            "hits": self._hits,
+            "misses": self._misses,
+            "sets": self._sets,
+            "errors": self._errors,
+            "size": self.size(),
+            "hit_rate": round(hit_rate, 3),
+        }
 
 
 class RateLimiter:
@@ -199,6 +350,116 @@ class RateLimiter:
             if now - call_time < self.period
         ]
         return max(0, self.max_calls - len(self.calls[key]))
+
+    @property
+    def backend_name(self) -> str:
+        """Backend identifier for /metrics and structured logs."""
+        return "local"
+
+
+class RedisRateLimiter:
+    """Distributed fixed-window rate limiter backed by Redis (Phase 6.1).
+
+    Same public interface as `RateLimiter` (`check`, `wait_time`, `remaining`,
+    `backend_name`) so it is a drop-in replacement at the call site.
+
+    Algorithm — canonical Redis recipe:
+        val = INCR  rate:{namespace}:{key}
+        if val == 1:
+            EXPIRE rate:{namespace}:{key} period_seconds
+        if val > max_calls:
+            return False  (denied; wait_time() returns remaining TTL)
+        return True
+
+    Correctness rests on `INCR` being atomic on the Redis server. This is the
+    standard fixed-window algorithm; we do NOT use sorted-set sliding windows
+    because at 10 req/min scale the extra precision is not worth the extra
+    commands (see Decision 24 in project_memory/DECISIONS.md).
+
+    Failure handling — dual-mode (Decision 23):
+        Any Redis exception (ConnectionError, TimeoutError, RedisError, ...) is
+        caught, logged via `logger.warning(event="rate_limiter_fallback", ...)`,
+        and the call is delegated to `self.fallback` (a live in-memory
+        `RateLimiter`). The system never raises and never blocks user requests
+        on Redis problems. `backend_name` reflects the backend used by the
+        most recent `check()` call so /metrics shows the active mode.
+    """
+
+    def __init__(
+        self,
+        redis_client: Any,
+        max_calls: int = 60,
+        period: int = 60,
+        namespace: str = "orion",
+        fallback: Optional["RateLimiter"] = None,
+    ):
+        self.redis = redis_client
+        self.max_calls = max_calls
+        self.period = period
+        self.namespace = namespace
+        # Live fallback kept hot so any Redis blip is invisible to callers.
+        self.fallback = fallback if fallback is not None else RateLimiter(
+            max_calls=max_calls, period=period
+        )
+        self._last_backend = "redis"
+
+    def _redis_key(self, key: str) -> str:
+        return f"{self.namespace}:rate:{key}"
+
+    def check(self, key: str = "default") -> bool:
+        """Atomically increment the counter and return whether the call is allowed.
+
+        On any Redis error, falls back to the in-memory limiter so that callers
+        never see Redis failures.
+        """
+        rkey = self._redis_key(key)
+        try:
+            # Atomic on the server side; safe under any number of concurrent callers.
+            val = self.redis.incr(rkey)
+            if val == 1:
+                # First hit in this window — install the TTL.
+                self.redis.expire(rkey, self.period)
+            self._last_backend = "redis"
+            return val <= self.max_calls
+        except Exception as exc:
+            # Decision 23: dual-mode. Log and delegate; never raise.
+            logger.warning(
+                f"RedisRateLimiter falling back to local for key={key}",
+                event="rate_limiter_fallback",
+                error=f"{type(exc).__name__}: {exc}",
+                key=key,
+            )
+            self._last_backend = "local"
+            return self.fallback.check(key)
+
+    def wait_time(self, key: str = "default") -> float:
+        """Seconds until the current window expires (capped at `period`)."""
+        rkey = self._redis_key(key)
+        try:
+            ttl = self.redis.ttl(rkey)
+            if ttl is None or ttl < 0:
+                # -1 = no expiry, -2 = key missing → no wait needed
+                return 0.0
+            return float(min(ttl, self.period))
+        except Exception:
+            # Mirror check()'s fallback behavior so /metrics stays consistent.
+            return self.fallback.wait_time(key)
+
+    def remaining(self, key: str = "default") -> int:
+        """Best-effort remaining calls in the current window."""
+        rkey = self._redis_key(key)
+        try:
+            val_raw = self.redis.get(rkey)
+            used = int(val_raw) if val_raw is not None else 0
+            return max(0, self.max_calls - used)
+        except Exception:
+            return self.fallback.remaining(key)
+
+    @property
+    def backend_name(self) -> str:
+        """Backend used by the most recent check() — 'redis' or 'local'."""
+        return self._last_backend
+
 
 #study
 class CircuitBreaker:

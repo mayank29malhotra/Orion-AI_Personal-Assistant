@@ -544,6 +544,8 @@ async def health_check():
             "memory_db": False,
             "retry_queue": False,
             "llm_circuit_breaker": None,
+            "redis": None,
+            "checkpointer": None,
         }
     }
 
@@ -560,6 +562,20 @@ async def health_check():
         health["checks"]["llm_circuit_breaker"] = cb_state
         if cb_state["state"] == "open":
             health["status"] = "degraded"
+
+    # Optional Redis subsystem (Phase 6.0). Redis being unreachable is NOT
+    # degraded — it's optional infra and Orion runs fully without it.
+    try:
+        from core.redis_client import get_status as _redis_status
+        health["checks"]["redis"] = _redis_status()
+    except Exception:
+        health["checks"]["redis"] = {"enabled": False, "connected": False, "mode": "disabled", "latency_ms": None}
+
+    # Phase 6.2: checkpointer backend ("redis" or "memory"). Reports which
+    # BaseCheckpointSaver Orion is using for thread state. Not health-affecting
+    # on its own — fallback to MemorySaver always works.
+    if orion_instance is not None:
+        health["checks"]["checkpointer"] = getattr(orion_instance, "checkpointer_backend", "memory")
 
     # If Orion isn't initialized, report degraded
     if not orion_instance:
@@ -592,6 +608,7 @@ async def metrics_endpoint():
         "memory": {},
         "retry_queue": {},
         "pending_queue": {},
+        "redis": None,
     }
     
     # Orion-level metrics (request counts, latency, circuit breaker)
@@ -608,6 +625,13 @@ async def metrics_endpoint():
             metrics["pending_queue"] = pending_queue.get_stats()
     except Exception:
         pass  # Don't let metrics collection break the endpoint
+    
+    # Optional Redis status (Phase 6.0)
+    try:
+        from core.redis_client import get_status as _redis_status
+        metrics["redis"] = _redis_status()
+    except Exception:
+        metrics["redis"] = {"enabled": False, "connected": False, "mode": "disabled", "latency_ms": None}
     
     return metrics
 

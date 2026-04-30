@@ -1,20 +1,20 @@
 # 🌟 Orion AI Personal Assistant
 
-An advanced AI-powered personal assistant with **60 tools** across **9 intelligent categories**, **production-grade reliability** (circuit breaker, rate limiting, graceful shutdown), **full observability** (structured logging, correlation IDs, metrics endpoint), and multi-channel access (Telegram, Gradio, Email, Scheduler). Features an **LLM-based intent router** that classifies queries and selects only the relevant tools per request.
+An advanced AI-powered personal assistant with **82 tools across 10 intelligent categories** (60 core + 22 Swiggy MCP), **production-grade reliability** (circuit breaker, rate limiting, graceful shutdown), **full observability** (structured logging, correlation IDs, metrics endpoint), an **optional Redis backend** (distributed rate limiter, durable LangGraph checkpoints, shared search cache), and multi-channel access (Telegram, Gradio, Email, Scheduler). Features an **LLM-based intent router** that classifies queries and selects only the relevant tools per request.
 
 > **For detailed technical documentation, see [ARCHITECTURE.md](ARCHITECTURE.md)**
 
 ## ✨ Features
 
 ### 🎯 Core Capabilities
-- **LLM-Based Intent Router**: Queries are classified into 9 categories (TRAVEL, COMMUNICATION, PRODUCTIVITY, DEVELOPER, MEDIA, RESEARCH, SYSTEM, BROWSER, GENERAL) using a dedicated Groq LLM (`llama-3.1-8b-instant`) with keyword-based fallback
+- **LLM-Based Intent Router**: Queries are classified into 10 categories (TRAVEL, COMMUNICATION, PRODUCTIVITY, DEVELOPER, MEDIA, RESEARCH, SYSTEM, BROWSER, FOOD, GENERAL) using a dedicated Groq LLM (`llama-3.1-8b-instant`) with keyword-based fallback
 - **Focused Tool Selection**: Only category-relevant tools (+ research tools) are given to the LLM per query — reducing token usage by 60-87%
-- **Confidence-Based Routing**: Router returns a confidence score (0.0–1.0); low-confidence queries fall back to the full 60-tool set
+- **Confidence-Based Routing**: Router returns a confidence score (0.0–1.0); low-confidence queries fall back to the full 82-tool set
 - **Intelligent Task Execution**: Uses LangGraph workflow with worker-evaluator pattern
 - **Persistent Memory**: Remembers conversations across sessions (SQLite-based)
 - **Per-User Thread Isolation**: Each user × channel combination gets its own conversation thread
 - **Circuit Breaker**: Fails fast when Groq LLM is down (5 failures → 60s recovery → probe → resume). Prevents cascading failures and gives users immediate feedback
-- **Per-User Rate Limiting**: Each user gets 10 requests/minute (configurable). Prevents one user from exhausting the shared API quota
+- **Per-User Rate Limiting**: Each user gets 10 requests/minute (configurable). Prevents one user from exhausting the shared API quota. *When `REDIS_ENABLED=true`, the limiter uses atomic Redis `INCR`+`EXPIRE` so the budget is enforced across multiple Orion instances; falls back to local in-memory limiter on any Redis error (Phase 6.1).*
 - **Health Check Endpoint**: `GET /health` returns subsystem status (200 healthy / 503 degraded). Load-balancer and monitoring compatible
 - **Structured Logging**: Dual-output — human-readable console + JSON file (`orion_structured.log`). Every log call accepts `**context` kwargs for structured data
 - **Correlation IDs**: Every request gets a unique `request_id` (8-char UUID) traced through worker → tools → evaluator for end-to-end debugging
@@ -22,6 +22,7 @@ An advanced AI-powered personal assistant with **60 tools** across **9 intellige
 - **Input Validation**: All incoming messages validated via Pydantic `ChatRequest` model before any LLM call — saves tokens on bad input
 - **Config Validation**: `Config.validate_or_fail()` at startup catches missing API keys, invalid numeric bounds, bad port ranges — fail fast before heavy initialization
 - **Graceful Shutdown**: In-flight request tracking, drain timeout (30s default), and clean resource cleanup on shutdown
+- **Optional Redis Backend** *(Phase 6.0–6.3)*: When `REDIS_ENABLED=true`, Orion uses Redis for (1) distributed per-user rate limiting via atomic `INCR`+`EXPIRE`, (2) durable LangGraph checkpoints via `RedisSaver` (threads survive process restarts and are shareable across instances), and (3) a shared search cache for `web_search` / `wikipedia_search`. Every Redis-backed component is **dual-mode** with a live in-memory fallback — Redis can be disabled, unreachable, or fail mid-request and Orion stays fully functional.
 - **Rate Limiting**: Smart cooldowns to protect free tier API limits (global + per-user)
 - **Auto-Retry**: Failed requests automatically retry with notifications
 - **Error Handling**: Robust retry logic and comprehensive error reporting
@@ -40,13 +41,14 @@ An advanced AI-powered personal assistant with **60 tools** across **9 intellige
 - **✅ Input Validation**: Pydantic `ChatRequest` model (message length, channel chars, whitespace)
 - **⚙️ Config Validation**: 11 validation checks at startup with critical/warning separation
 - **🛑 Graceful Shutdown**: `_shutting_down` flag, in-flight counter, drain-then-cleanup pattern
+- **🧱 Optional Redis Layer (Phase 6)**: distributed rate limiter (`RedisRateLimiter`), durable checkpoints (`RedisSaver`), shared search cache (`RedisCache`) — all dual-mode with in-memory fallback
 - **🔄 Auto-Retry Queue**: Failed requests retry automatically (2 attempts, 5 min apart)
 - **📢 Multi-Channel Notifications**: Get notified on all channels if something fails
 - **☁️ Cloud Ready**: Deploy anywhere (Oracle Cloud Free, Docker, VPS)
 - **📋 Pending Request Queue**: Queries are saved when bot is down, processed when back online
 - **💓 Keep-Alive System**: Built-in self-ping for always-on deployment
 
-### 🔧 60 Powerful Tools (9 Categories)
+### 🔧 82 Tools (10 Categories)
 
 #### 📧 Email Management
 - **Send Emails**: Send emails with attachments via SMTP
@@ -120,6 +122,14 @@ An advanced AI-powered personal assistant with **60 tools** across **9 intellige
 #### 📱 Communication
 - **Push Notifications**: Send notifications via NTFY
 - Real-time alerts for important updates
+
+#### 🍔 Food Ordering & Table Booking (Phase 8 — Swiggy MCP)
+> **Orion can find and order food and book tables at your favorite restaurants — all through Swiggy.**
+- **Food Delivery (Swiggy Food)**: 14 tools — search restaurants by cuisine / dish / locality, browse menus, build a cart with variants & add-ons, fetch & apply coupons, place orders (COD, ₹1000 cap in v1), track delivery in real time.
+- **Table Reservations (Swiggy Dineout)**: 8 tools — search restaurants (incl. saved favorites) by locality / cuisine / category, view ratings & deals, check 7-day slot availability, book free reservations.
+- **Authentication**: OAuth 2.1 + PKCE bearer token (one token works across both servers). Tools load automatically when `SWIGGY_ACCESS_TOKEN` is set in `.env` — same model as `GITHUB_TOKEN` for GitHub tools. When the token is absent the loader logs an info message and FOOD tools simply do not load.
+- **Tool naming**: All Swiggy tools are auto-prefixed (`swiggy_food_*`, `swiggy_dineout_*`) to avoid collisions with the other 60 tools.
+- **Out of scope**: Swiggy's Instamart (grocery) MCP server is intentionally not wired — Orion's FOOD domain covers food ordering and table booking only.
 
 ## 🚀 Quick Start
 
@@ -248,7 +258,7 @@ Orion/
 │
 ├── agents/                    # 🤖 Intent classification & routing
 │   ├── __init__.py           # Package exports
-│   ├── base_agent.py         # AgentCategory enum (9 categories)
+│   ├── base_agent.py         # AgentCategory enum (10 categories)
 │   ├── router.py             # LLM + keyword intent classifier, TOOL_CATEGORIES mapping
 │   ├── communication_agent.py
 │   ├── developer_agent.py
@@ -258,7 +268,7 @@ Orion/
 │   ├── system_agent.py
 │   └── travel_agent.py
 │
-├── tools/                     # 🔧 All 60 tools organized by category
+├── tools/                     # 🔧 82 tools across 10 categories (60 native + 22 Swiggy MCP)
 │   ├── __init__.py           # Package exports
 │   ├── loader.py             # Tool aggregator (get_all_tools)
 │   ├── browser.py            # Playwright web automation (lazy import)
@@ -281,12 +291,16 @@ Orion/
 │   ├── proactive.py          # Proactive assistant features
 │   └── scheduler.py          # Background task scheduler
 │
-├── tests/                     # ✅ Test suite (82 tests across 4 phases)
+├── tests/                     # ✅ Test suite (Phases 1–4 + 6.0–6.3)
 │   ├── __init__.py           # Package marker
-│   ├── test_phase1.py        # 7 tests: router, tool index, thread isolation, LLM
-│   ├── test_phase2.py        # 7 tests: circuit breaker, rate limiter, health check
-│   ├── test_phase3.py        # 36 tests: logging, metrics, latency, correlation IDs
-│   ├── test_phase4.py        # 32 tests: input validation, config, shutdown
+│   ├── test_phase1.py        # Router, tool index, thread isolation, LLM
+│   ├── test_phase2.py        # Circuit breaker, rate limiter, health check
+│   ├── test_phase3.py        # Logging, metrics, latency, correlation IDs
+│   ├── test_phase4.py        # Input validation, config, shutdown
+│   ├── test_phase6_foundation.py   # Phase 6.0: Redis client foundation (11 tests)
+│   ├── test_phase6_ratelimiter.py  # Phase 6.1: distributed rate limiter (12 tests)
+│   ├── test_phase6_checkpoints.py  # Phase 6.2: distributed checkpoints (9 tests)
+│   ├── test_phase6_searchcache.py  # Phase 6.3: distributed search cache (13 tests)
 │   ├── test_setup.py         # Setup verification tests
 │   └── test_local.py         # Interactive CLI tester
 │
@@ -354,6 +368,20 @@ EMAIL_PASSWORD=your_app_password
 4. Download `credentials.json` to project root
 5. First use will prompt for authentication
 
+### Swiggy MCP Setup (Phase 8 — FOOD domain)
+Swiggy Builders Club exposes Food and Dineout as MCP servers. Tools load automatically whenever `SWIGGY_ACCESS_TOKEN` is set in `.env` — same activation model as `GITHUB_TOKEN` for GitHub tools. When the token is absent, the loader logs an info message and FOOD-category tools simply don't load. (Swiggy's Instamart server is intentionally out of scope.)
+
+1. Apply for production access at [mcp.swiggy.com/builders/access](https://mcp.swiggy.com/builders/access/) (or run locally on `http://localhost`).
+2. Complete the OAuth 2.1 + PKCE flow — easiest path is to install the Swiggy MCP servers in Claude Desktop / Cursor / VS Code via `mcp-remote` and capture the bearer token from the resulting session, or run the [authorize endpoint](https://mcp.swiggy.com/builders/docs/start/authenticate.md) manually.
+3. Add to `.env`:
+```env
+SWIGGY_ACCESS_TOKEN=eyJhbGciOiJI...   # 5-day bearer; re-run OAuth on 401
+# Optional per-server kill switches (default: all on)
+# SWIGGY_FOOD_ENABLED=true
+# SWIGGY_DINEOUT_ENABLED=true
+```
+On startup Orion logs `Swiggy MCP loaded: 22 tools across 2 server(s)` when configured correctly. When the token is missing the loader logs an info-level message and skips FOOD tools without raising.
+
 ### Custom Configuration
 Edit `config.py` to customize:
 - Directory locations
@@ -364,21 +392,29 @@ Edit `config.py` to customize:
 
 ### Running Tests
 ```bash
-# Run all 82 tests
+# Run the full regression suite
 python -m pytest tests/ -v
 
 # Run by phase
-python -m pytest tests/test_phase1.py -v   # Router + thread isolation (7 tests)
-python -m pytest tests/test_phase2.py -v   # Circuit breaker + rate limiter + health (7 tests)
-python -m pytest tests/test_phase3.py -v   # Logging + metrics + latency + correlation IDs (36 tests)
-python -m pytest tests/test_phase4.py -v   # Input validation + config + graceful shutdown (32 tests)
+python -m pytest tests/test_phase1.py -v             # Router + thread isolation
+python -m pytest tests/test_phase2.py -v             # Circuit breaker + rate limiter + health
+python -m pytest tests/test_phase3.py -v             # Logging + metrics + latency + correlation IDs
+python -m pytest tests/test_phase4.py -v             # Input validation + config + graceful shutdown
+python -m pytest tests/test_phase6_foundation.py -v  # Phase 6.0: Redis foundation (11)
+python -m pytest tests/test_phase6_ratelimiter.py -v # Phase 6.1: distributed rate limiter (12)
+python -m pytest tests/test_phase6_checkpoints.py -v # Phase 6.2: distributed checkpoints (9)
+python -m pytest tests/test_phase6_searchcache.py -v # Phase 6.3: distributed search cache (13)
 ```
 
-**82 automated tests** across 4 phases covering:
-- **Phase 1** (7): keyword/LLM classification, delegation, tool index (60 tools × 9 categories), focused selection, thread isolation
-- **Phase 2** (7): circuit breaker state transitions (CLOSED→OPEN→HALF_OPEN→CLOSED), fail-fast, probe failure, per-user rate limiter, health check JSON
-- **Phase 3** (36): structured logging with `**context`, JSON output validation, metrics attributes, `get_metrics()`, latency rolling windows (100-cap, percentiles), `/metrics` endpoint, correlation IDs, worker/evaluator instrumentation
-- **Phase 4** (32): `ChatRequest` model (valid/invalid inputs, defaults, length limits, channel chars, whitespace), config validation (numeric bounds, model names, ports, `validate_or_fail`, `ConfigValidationError`), graceful shutdown (flags, counters, locks, async method, result dict), metrics shutdown fields, in-flight tracking, lifespan integration
+**Coverage by phase:**
+- **Phase 1**: keyword/LLM classification, delegation, tool index (82 tools × 10 categories), focused selection, thread isolation
+- **Phase 2**: circuit breaker state transitions (CLOSED→OPEN→HALF_OPEN→CLOSED), fail-fast, probe failure, per-user rate limiter, health check JSON
+- **Phase 3**: structured logging with `**context`, JSON output validation, metrics attributes, `get_metrics()`, latency rolling windows (100-cap, percentiles), `/metrics` endpoint, correlation IDs, worker/evaluator instrumentation
+- **Phase 4**: `ChatRequest` model (valid/invalid inputs, defaults, length limits, channel chars, whitespace), config validation (numeric bounds, model names, ports, `validate_or_fail`, `ConfigValidationError`), graceful shutdown (flags, counters, locks, async method, result dict), metrics shutdown fields, in-flight tracking, lifespan integration
+- **Phase 6.0** (11): Redis config fields, validation warnings (non-fatal), factory paths (disabled / empty URL / unreachable / fakeredis), `get_status()` shape, `Orion.redis` attribute, `/health` and `/metrics` include redis block
+- **Phase 6.1** (12): `RedisRateLimiter` under/over threshold, TTL reset, 20-thread concurrency atomicity, Redis-error fallback, namespace isolation, `backend_name` property, Orion picks correct backend, `/metrics` exposes backend, backward compat with local `RateLimiter`
+- **Phase 6.2** (9): default uses `MemorySaver`, `/metrics` exposes `checkpointer`, `RedisSaver` selected when redis available (mocked), failure path falls back to `MemorySaver`, no-swap when redis is `None`, `/health` declares `checkpointer` field, `thread_id` invariant preserved, `RedisSaver` class importable
+- **Phase 6.3** (13): in-memory `Cache` stats parity, `RedisCache` round-trip + TTL + JSON encoding + miss path, dual-mode fallback on get/set, `backend_name` flips after Redis error, `web_search` / `wikipedia_search` cache hits avoid 2nd API call, `SEARCH_CACHE_ENABLED=false` short-circuits, `/metrics` exposes `search_cache`, key determinism, namespace isolation
 
 ## 🛡️ Security & Best Practices
 
@@ -483,6 +519,10 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 - [x] Input validation via Pydantic models
 - [x] Config validation with fail-fast startup
 - [x] Graceful shutdown with drain timeout
+- [x] Optional Redis foundation (Phase 6.0) — opt-in client with `/health` + `/metrics` integration
+- [x] Distributed rate limiter (Phase 6.1) — `RedisRateLimiter` with in-memory fallback
+- [x] Distributed checkpoints (Phase 6.2) — `RedisSaver` with `MemorySaver` fallback
+- [x] Distributed search cache (Phase 6.3) — `RedisCache` for `web_search` / `wikipedia_search`
 
 ### 🔜 Future Enhancements
 - [ ] Centralized API Gateway (`/v1/chat` with bearer token auth)
@@ -675,6 +715,12 @@ NTFY_TOPIC=your_ntfy_topic
 
 # Data directory
 ORION_DATA_DIR=/home/ubuntu/Orion-AI_Personal-Assistant/data
+
+# Optional Redis backend (Phase 6.0+) - safe to leave disabled
+# REDIS_ENABLED=false
+# REDIS_URL=redis://localhost:6379/0
+# REDIS_NAMESPACE=orion
+# REDIS_SOCKET_TIMEOUT=2.0
 ```
 
 Save with `Ctrl+X`, then `Y`, then `Enter`.
@@ -775,10 +821,10 @@ sudo systemctl restart orion
 |-----------|---------|-----------------|
 | **Python 3.8+** | Core language | LangChain/LangGraph ecosystem is Python-native. Rich async support for multi-channel I/O |
 | **LangGraph** | Agent orchestration | StateGraph with `worker→tools→evaluator→END` pattern. Built-in checkpointing, cycle handling, and state management. Better than raw LangChain agents for multi-step tasks |
-| **LangChain** | Tool framework | Standardized `BaseTool` interface for 60 tools. `ChatGroq` wrapper handles API calls, retries, and structured output |
+| **LangChain** | Tool framework | Standardized `BaseTool` interface for all 82 tools (60 native + 22 Swiggy MCP loaded via `langchain-mcp-adapters`). `ChatGroq` wrapper handles API calls, retries, and structured output |
 | **Groq (LLM Provider)** | LLM inference | Free tier with generous limits: 1K RPD for `llama-4-scout-17b` (worker), 14.4K RPD for `llama-3.1-8b-instant` (router). Fastest inference speeds available |
 | **llama-4-scout-17b-16e** | Worker + evaluator LLM | Best free-tier model for tool calling. 30K context window, good instruction following |
-| **llama-3.1-8b-instant** | Intent router LLM | 14,400 RPD (14× worker quota). 8B is sufficient for "classify into 1 of 9 categories". Separate quota = zero conflict with worker |
+| **llama-3.1-8b-instant** | Intent router LLM | 14,400 RPD (14× worker quota). 8B is sufficient for "classify into 1 of 10 categories". Separate quota = zero conflict with worker |
 | **Pydantic** | Input/output validation | Already a LangChain dependency (zero new deps). Type-safe structured output from LLM (`RouterClassification`), input validation (`ChatRequest`), config validation |
 | **SQLite** | Conversation memory + retry queue | Zero-config, file-based, perfect for single-user personal assistant. WAL mode for concurrent reads. No server process to manage |
 | **FastAPI** | HTTP endpoints | `/health`, `/metrics`, `/telegram/webhook`. Async-native, auto-generates OpenAPI docs, already used by Telegram integration |

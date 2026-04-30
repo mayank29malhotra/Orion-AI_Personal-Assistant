@@ -19,6 +19,7 @@ from tools.indian_railways import (
 from tools.flights import (
     get_flight_status, get_flight_by_route, get_airport_info, track_flight_live
 )
+from tools.swiggy import get_swiggy_tools
 
 
 def get_railway_tools():
@@ -105,6 +106,15 @@ async def get_all_tools():
     # Flight tools (flight status, live tracking)
     tools.extend(get_flight_tools())
     
+    # Swiggy MCP tools (Phase 8 — FOOD domain: Food + Dineout)
+    # Returns [] gracefully when SWIGGY_ACCESS_TOKEN is not configured.
+    try:
+        swiggy_tools = await get_swiggy_tools()
+        tools.extend(swiggy_tools)
+    except Exception as e:
+        import logging
+        logging.getLogger("Orion").warning(f"Swiggy MCP tools failed to load: {e}")
+
     # Python REPL
     tools.extend(get_repl_tools())
     

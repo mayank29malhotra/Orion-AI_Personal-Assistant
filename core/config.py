@@ -76,7 +76,54 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     TELEGRAM_ALLOWED_USER_ID = os.getenv("TELEGRAM_ALLOWED_USER_ID")  # Comma-separated for multiple
     TELEGRAM_WEBHOOK_PORT = int(os.getenv("TELEGRAM_WEBHOOK_PORT", "8000"))
-    
+
+    # ============ Optional Redis Backend (Phase 6.0) ============
+    # Redis is OPTIONAL infrastructure. When REDIS_ENABLED=false (default) or the
+    # configured URL is unreachable, Orion runs exactly as before using in-memory
+    # rate limiting and LangGraph MemorySaver. Bad/unreachable Redis is a warning,
+    # never a fatal startup error (see Decision #19 pattern).
+    REDIS_ENABLED = os.getenv("REDIS_ENABLED", "false").lower() == "true"
+    # Standard Redis URL: redis://[:password@]host:port/db (or rediss:// for TLS).
+    REDIS_URL = os.getenv("REDIS_URL", "")
+    # Key prefix to namespace all Orion keys in a shared Redis. e.g. "orion:rate:user:42".
+    REDIS_NAMESPACE = os.getenv("REDIS_NAMESPACE", "orion")
+    # Per-operation timeout (seconds). Kept short so Redis hiccups can't stall request flow.
+    REDIS_SOCKET_TIMEOUT = float(os.getenv("REDIS_SOCKET_TIMEOUT", "2.0"))
+
+    # ============ Swiggy MCP Integration (Phase 8 — FOOD domain) ============
+    # Swiggy Builders Club exposes Food and Dineout as MCP servers over
+    # streamable HTTP, OAuth 2.1 + PKCE. Tools load automatically whenever
+    # `SWIGGY_ACCESS_TOKEN` is set in the environment — same model as
+    # `GITHUB_TOKEN` for GitHub tools. When the token is absent, the loader
+    # logs an info message and the FOOD category gracefully reports
+    # "not configured".
+    #
+    # Scope: Orion uses Swiggy for *food ordering* and *table reservations*
+    # only. Swiggy's `/im` Instamart (grocery) server is intentionally not
+    # wired — grocery is out of scope for this personal-assistant build.
+    #
+    # To enable: run the OAuth flow at https://mcp.swiggy.com/auth/authorize
+    # (or use mcp-remote / Claude Desktop to capture the token), then set
+    # SWIGGY_ACCESS_TOKEN=<bearer> in .env.
+    #
+    # Tokens last 5 days; refresh tokens are not yet wired in Swiggy v1.0,
+    # so on 401 the user re-runs the flow. See tools/swiggy.py for details.
+    SWIGGY_ACCESS_TOKEN = os.getenv("SWIGGY_ACCESS_TOKEN", "")
+    SWIGGY_FOOD_URL = os.getenv("SWIGGY_FOOD_URL", "https://mcp.swiggy.com/food")
+    SWIGGY_DINEOUT_URL = os.getenv("SWIGGY_DINEOUT_URL", "https://mcp.swiggy.com/dineout")
+    # Per-server kill-switches (default ON; set to false to disable an individual server)
+    SWIGGY_FOOD_ENABLED = os.getenv("SWIGGY_FOOD_ENABLED", "true").lower() == "true"
+    SWIGGY_DINEOUT_ENABLED = os.getenv("SWIGGY_DINEOUT_ENABLED", "true").lower() == "true"
+
+    # ============ Search Cache (Phase 6.3) ============
+    # Caches results of idempotent search tools (web_search, wikipedia_search) to
+    # reduce duplicate Serper / Wikipedia API calls. Uses RedisCache when Redis is
+    # available, otherwise an in-memory Cache. Disable to bypass entirely.
+    SEARCH_CACHE_ENABLED = os.getenv("SEARCH_CACHE_ENABLED", "true").lower() == "true"
+    # TTL in seconds. 600s = 10 minutes is short enough for results to stay fresh
+    # for time-sensitive queries while still saving most repeat-call cost.
+    SEARCH_CACHE_TTL_SECONDS = int(os.getenv("SEARCH_CACHE_TTL_SECONDS", "600"))
+
     @classmethod
     def ensure_directories(cls):
         """Ensure all required directories exist"""
@@ -133,7 +180,26 @@ class Config:
             errors.append(f"SMTP_PORT must be 1-65535, got {cls.SMTP_PORT}")
         if cls.IMAP_PORT <= 0 or cls.IMAP_PORT > 65535:
             errors.append(f"IMAP_PORT must be 1-65535, got {cls.IMAP_PORT}")
-        
+
+        # --- Redis (optional, Phase 6.0): warnings only, never blocks startup ---
+        if cls.REDIS_ENABLED and not cls.REDIS_URL:
+            errors.append("REDIS_ENABLED=true but REDIS_URL is empty (Redis features will be disabled)")
+        if cls.REDIS_SOCKET_TIMEOUT <= 0:
+            errors.append(f"REDIS_SOCKET_TIMEOUT must be > 0, got {cls.REDIS_SOCKET_TIMEOUT}")
+        if not cls.REDIS_NAMESPACE:
+            errors.append("REDIS_NAMESPACE is empty (using default 'orion' may cause key collisions)")
+
+        # --- Search cache (optional, Phase 6.3): warnings only ---
+        if cls.SEARCH_CACHE_TTL_SECONDS <= 0:
+            errors.append(
+                f"SEARCH_CACHE_TTL_SECONDS must be > 0, got {cls.SEARCH_CACHE_TTL_SECONDS} "
+                f"(cache will be disabled)"
+            )
+
+        # --- Swiggy MCP (Phase 8): no validation needed ---
+        # When SWIGGY_ACCESS_TOKEN is empty, the loader logs an info message
+        # and returns []. Same pattern as GITHUB_TOKEN — not a config error.
+
         return errors
     
     @classmethod
